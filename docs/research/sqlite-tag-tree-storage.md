@@ -175,3 +175,58 @@
 - D1 官方**未明确声明**支持 `WITH RECURSIVE`（仅有“复用 SQLite 引擎”的间接证据）。
 - D1 **未公布**具体 SQLite 版本号（社区称约 3.46，属推断）。
 - 排序字段、`sort_order` 维护方式为通用设计推断，非单一官方文档。
+
+---
+
+## 6. 实测补充（2026-09-15）
+
+> **触发**：决策票 «标签体系数据模型» 最终把层级定为**硬性两级**（组 › 标签），比本笔记上文
+> 第 5 节所设的「深度 ≤ 3」前提更窄。因此在裁决 «标签聚合与查询语义» 时，建样例库实测了
+> 聚合 SQL 与索引命中，结论对本节之前的推荐做了一处**修正**。
+>
+> **口径**：本机 Python 3.13 自带 **SQLite 3.53.1**。**这不是 D1 的版本**——D1 侧须以
+> `SELECT sqlite_version()` 另行复核。可复跑脚本与完整输出见
+> `docs/verification/tag-aggregation-probe.py` 与 `.out.txt`。
+
+### 6.1 聚合：两级约束下无需 path 前缀匹配
+
+父标签金额 = 自身直挂 + 全体后代，**单条 SQL、无递归**：
+
+```sql
+SELECT COALESCE(p.id, t.id) AS group_id,
+       SUM(e.amount_cents)  AS total
+FROM entry e
+JOIN tag t      ON e.category_tag_id = t.id
+LEFT JOIN tag p ON t.parent_id = p.id
+GROUP BY COALESCE(p.id, t.id)
+```
+
+实测：各根组之和 **5,400 元** = 总支出 **5,400 元**，守恒成立。
+同一查询可扩展为「类别 × 成员」交叉表（`SUM(CASE WHEN member_id = ? …)`），仍是一条 SQL。
+
+### 6.2 索引陷阱：`path LIKE` 前缀在默认配置下**全表扫描**
+
+| 索引形态 | `case_sensitive_like` | 字面量 pattern | 绑定参数 pattern |
+|---|---|---|---|
+| `path`（BINARY） | OFF（SQLite 默认） | **SCAN tag** | **SCAN tag** |
+| `path`（BINARY） | ON | SEARCH … USING INDEX | SEARCH … USING INDEX |
+| `path COLLATE NOCASE` | OFF（默认） | SEARCH … USING INDEX | SEARCH … USING INDEX |
+
+→ **默认配置 + 普通索引 = 全表扫描**。若仍采用 path 前缀方案，**必须**给索引加
+`COLLATE NOCASE`（或在连接中开 `PRAGMA case_sensitive_like=ON`，但 D1 能否设该 pragma
+未找到官方确认，故 NOCASE 是唯一稳妥项）。绑定参数与字面量 pattern 行为一致。
+
+### 6.3 结论修正
+
+在**硬性两级**的实际约束下，`path` 前缀匹配是**多余**的：
+
+- 取某组的子标签 → `WHERE parent_id = ?`
+- 父 = 自身 + 后代 → §6.1 的自连接
+- 相邻层钻取 → 单次 JOIN，无需递归、无需前缀
+
+因此 **`path` 字段降级为展示与排错的冗余字段，不参与任何查询**，也就完全绕开 §6.2 的陷阱。
+
+对上文第 5 节的处置：**「路径枚举」的推荐在「深度 ≤ 3」前提下依然成立**（原文保留不改，
+以保持可追溯）；但在两级前提下，**邻接表（`parent_id` 自连接）是更简且更稳的选择**。
+第 2.1 节原判「邻接表取后代必须递归」仅在**任意深度**下成立——两级是它的一个特例，
+一次 `LEFT JOIN` 即可覆盖。

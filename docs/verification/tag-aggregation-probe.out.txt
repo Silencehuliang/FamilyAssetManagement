@@ -1,0 +1,76 @@
+SQLITE_VERSION = 3.53.1
+
+=== [Q1] 按组聚合（父=自身+后代，单条 SQL，无递归）===
+  住房   (id=4)    3000.00 元
+  餐饮   (id=1)    2100.00 元
+  医疗   (id=6)     300.00 元
+
+=== [Q1b] 树视图：子树合计 vs 仅自身直挂 ===
+  #1 餐饮   subtree=  2100.00  self_only=   700.00
+  #2 外卖   subtree=   800.00  self_only=   800.00
+  #3 买菜   subtree=   600.00  self_only=   600.00
+  #4 住房   subtree=  3000.00  self_only=     0.00
+  #5 房租   subtree=  3000.00  self_only=  3000.00
+  #6 医疗   subtree=   300.00  self_only=   300.00
+  → 「餐饮」subtree 2100 = 外卖 800 + 买菜 600 + 未细分 700
+    展开后若不补「未细分」行，子项之和对不上父项
+
+=== [Q1c] 守恒律校验 ===
+  总支出 = 5400.00 | 各根组之和 = 5400.00 | 相等: True
+
+=== [Q2] 对象维度：Σ(各对象) vs 总支出 ===
+  孩子      1900.00 元
+  我        500.00 元
+  老人       300.00 元
+  各对象之和        = 2700.00 元
+  被标对象的记录额  = 2200.00 元  ← Σ(各对象) 大于它，因同一笔可计入多个对象
+  未指定对象（缺口）= 3200.00 元
+
+=== [Q3] 类别 × 成员 交叉表（单条 SQL）===
+  住房    成员1=  3000.00  成员2=     0.00  合计=  3000.00
+  餐饮    成员1=  1000.00  成员2=  1100.00  合计=  2100.00
+  医疗    成员1=   300.00  成员2=     0.00  合计=   300.00
+
+=== [Q5] 路径枚举前缀 LIKE 的索引命中 ===
+
+  [A] 表上仅普通(BINARY)索引，case_sensitive_like=OFF（SQLite 默认）
+  --- A1 字面量 pattern
+      SELECT id,name FROM tag WHERE path LIKE '/1/%'
+      SCAN tag
+  --- A2 绑定参数 pattern
+      SELECT id,name FROM tag WHERE path LIKE ?
+      SCAN tag
+
+  [A'] 表上仅普通索引，case_sensitive_like=ON
+  --- A1' 字面量 pattern
+      SELECT id,name FROM tag WHERE path LIKE '/1/%'
+      SEARCH tag USING INDEX idx_path_bin (path>? AND path<?)
+  --- A2' 绑定参数 pattern
+      SELECT id,name FROM tag WHERE path LIKE ?
+      SEARCH tag USING INDEX idx_path_bin (path>? AND path<?)
+
+  [B] 表上仅 NOCASE 索引，case_sensitive_like=OFF（默认）
+  --- B1 字面量 pattern
+      SELECT id,name FROM tag WHERE path LIKE '/1/%'
+      SEARCH tag USING INDEX idx_path_nocase (path>? AND path<?)
+  --- B2 绑定参数 pattern
+      SELECT id,name FROM tag WHERE path LIKE ?
+      SEARCH tag USING INDEX idx_path_nocase (path>? AND path<?)
+
+  结论：默认配置 + 普通索引 → SCAN（全表）；须 NOCASE 索引或开 pragma 才命中。
+        两级约束下改用 parent_id 自连接，完全绕开此陷阱。
+
+=== [Q4] 日均口径对比（9 月，以 9/15 为「今天」）===
+  分母 = 期间总天数   30 →   180.00 元/天
+  分母 = 当期已过天数 15 →   360.00 元/天   ← 推荐
+  分母 = 有消费的天数  6 →   900.00 元/天
+
+=== [Q4b] 环比边界：上期无数据 ===
+  上期(8月)合计 = None
+  → 上期为 NULL/0 时变化率不可计算，须显示「无上期数据」，不得用 0 / ∞ / 100% 填充
+
+=== [D] 依赖能力实测（本机版本，D1 侧须复核）===
+  窗口函数 ROW_NUMBER()      可用
+  WITH RECURSIVE         可用
+  json_extract()         可用
+  CTE                    可用
