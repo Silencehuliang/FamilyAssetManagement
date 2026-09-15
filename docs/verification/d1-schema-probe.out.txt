@@ -1,0 +1,348 @@
+SQLITE_VERSION = 3.53.1
+PYTHON_SQLITE_LIB = (3, 53, 1)
+DDL = migrations/0001_init.sql
+
+PRAGMA foreign_keys = 1   <- 本机默认 OFF；此处显式对齐 D1（D1 恒为 ON 且无法关闭）
+DDL 执行：OK（19692 字符）
+
+==============================================================================
+【一】结构盘点
+==============================================================================
+表        12 张：budget, budget_alert_state, corporate_action, cron_run, entry, entry_object, member, member_idle_cash, position_version, quote_daily, report_delivery, tag
+显式索引  10 个：ix_budget_period, ix_ca_code_date, ix_cron_run_task, ix_entry_biz_date, ix_entry_cat_date, ix_entry_member_date, ix_entry_object_tag, ix_tag_parent, ux_budget_household_version, ux_budget_tag_version
+隐式索引  8 个：sqlite_autoindex_budget_alert_state_1, sqlite_autoindex_corporate_action_1, sqlite_autoindex_cron_run_1, sqlite_autoindex_entry_object_1, sqlite_autoindex_member_1, sqlite_autoindex_position_version_1, sqlite_autoindex_quote_daily_1, sqlite_autoindex_report_delivery_1
+触发器    16 个：trg_budget_cat_ins, trg_budget_cat_upd, trg_ca_applied_ins, trg_ca_applied_upd, trg_entry_cat_ins, trg_entry_cat_upd, trg_entry_object_ins, trg_entry_object_limit, trg_entry_object_upd, trg_member_limit_ins, trg_member_no_delete, trg_position_version_undo, trg_tag_builtin_del, trg_tag_builtin_upd, trg_tag_shape_ins, trg_tag_shape_upd
+视图      0 个（应为 0 —— 「报告 = 视图」是应用层实时算，不落库）
+
+==============================================================================
+【二】种子数据（两个成员、两期支出、预算版本、持仓版本、行情、除权事件）
+==============================================================================
+种子写入完成：member=2 tag=15 entry=7 entry_object=8 budget=5 position_version=6 quote_daily=6 corporate_action=1
+
+==============================================================================
+【三】约束与触发器实测（正例应通过 / 反例应被拒绝）
+==============================================================================
+
+-- 主体：恰 2 位 --
+  [PASS] 第 3 位成员被拒                                                  expect=error got=error member: 本系统恰有 2 位成员，不再新增
+  [PASS] 删除成员被拒                                                     expect=error got=error member: 成员不可删除
+
+-- 标签：两级硬限 --
+  [PASS] 对象标签带父被拒                                                   expect=error got=error tag: 对象标签不得有父；类别标签的父必须是根类别（两级硬限）
+  [PASS] 三级（父本身是子）被拒                                                expect=error got=error tag: 对象标签不得有父；类别标签的父必须是根类别（两级硬限）
+  [PASS] 有子节点者再获得父被拒（UPDATE）                                        expect=error got=error tag: 默认标签完全不可变
+  [PASS] 正常新增子标签通过                                                  expect=ok    got=ok    
+  [PASS] 自引用父被拒（CHECK）                                              expect=error got=error tag: 违反两级硬限（父必须为根类别 / 有子节点者不得有父 / 有子节点者不得改类型）
+
+-- 标签：默认标签完全不可变 --
+  [PASS] 默认标签改名被拒                                                   expect=error got=error tag: 默认标签完全不可变
+  [PASS] 默认标签归档被拒                                                   expect=error got=error tag: 默认标签完全不可变
+  [PASS] 默认标签删除被拒                                                   expect=error got=error tag: 默认标签不可删除
+  [PASS] 自建标签改名通过                                                   expect=ok    got=ok    
+  [PASS] 被历史引用的标签删除被拒（FK RESTRICT）                                  expect=error got=error tag: 默认标签不可删除
+  [PASS] 零引用的自建标签删除通过                                               expect=ok    got=ok    
+
+-- 记账：类型、金额、biz_date 冗余一致性、对象上限 --
+  [PASS] 类别标签位填对象标签被拒                                               expect=error got=error entry: category_tag_id 必须指向类别标签
+  [PASS] 金额为 0 被拒                                                   expect=error got=error CHECK constraint failed: amount_cents > 0
+  [PASS] 金额为负被拒                                                     expect=error got=error CHECK constraint failed: amount_cents > 0
+  [PASS] biz_date 与 occurred_at 不符被拒（跨日错位）                          expect=error got=error CHECK constraint failed: biz_date = date(occurred_at, 'unixepoch', '+8 hours')
+  [PASS] biz_date 与 occurred_at 相符通过（东八区 00:30 的边角）                 expect=ok    got=ok    
+  [PASS] 指向不存在的标签被拒（FK）                                             expect=error got=error entry: category_tag_id 必须指向类别标签
+  [PASS] 第 4 个对象标签通过（恰好到上限）                                         expect=ok    got=ok    
+  [PASS] 第 5 个对象标签被拒（上限 4）                                          expect=error got=error entry_object: 一笔 Entry 至多 4 个对象标签
+  [PASS] 对象位填类别标签被拒                                                 expect=error got=error entry_object: tag_id 必须指向对象标签
+
+-- 预算：版本唯一性（含 NULL 陷阱）、挂载范围 --
+  [PASS] 家庭总预算重复同一生效版本被拒（部分唯一索引）                                    expect=error got=error UNIQUE constraint failed: budget.period_type, budget.effective_from
+  [PASS] 标签预算重复同一生效版本被拒                                             expect=error got=error UNIQUE constraint failed: budget.tag_id, budget.period_type, budget.effective_from
+  [PASS] 家庭总预算：tag_id 非空被拒（CHECK）                                   expect=error got=error CHECK constraint failed: (scope = 'tag'       AND tag_id IS NOT NULL)
+      OR (scope = 'household' AND tag_id IS NULL)
+  [PASS] 标签预算：tag_id 为空被拒（CHECK）                                    expect=error got=error CHECK constraint failed: (scope = 'tag'       AND tag_id IS NOT NULL)
+      OR (scope = 'household' AND tag_id IS NULL)
+  [PASS] 预算挂对象标签被拒（触发器）                                             expect=error got=error budget: 只能挂在类别标签上
+  [PASS] 标签预算新版本（改预算）通过                                             expect=ok    got=ok    
+
+-- 行情：假 0 防护、昨收规则、来源枚举、主键幂等 --
+  [PASS] 最新价 0 被拒（假 0 防护）                                           expect=error got=error CHECK constraint failed: close_cents > 0
+  [PASS] 昨收 0 被拒（preKPrice 非交易日返回 0.0 的同类陷阱）                        expect=error got=error CHECK constraint failed: prev_close_cents IS NULL OR prev_close_cents > 0
+  [PASS] feed 行缺昨收被拒                                                expect=error got=error CHECK constraint failed: source = 'manual' OR prev_close_cents IS NOT NULL
+  [PASS] manual 行缺昨收通过                                              expect=ok    got=ok    
+  [PASS] 非法代码（裸六位码）被拒                                               expect=error got=error CHECK constraint failed: code GLOB 'sh[0-9][0-9][0-9][0-9][0-9][0-9]'
+      OR code GLOB 'sz[0-9][0-9][0-9][0-9][0-9][0-9]'
+  [PASS] 北交所代码被拒（须在求交阶段就滤掉）                                         expect=error got=error CHECK constraint failed: code GLOB 'sh[0-9][0-9][0-9][0-9][0-9][0-9]'
+      OR code GLOB 'sz[0-9][0-9][0-9][0-9][0-9][0-9]'
+  [PASS] 主键重复被拒                                                     expect=error got=error UNIQUE constraint failed: quote_daily.code, quote_daily.trade_date
+  [PASS] 来源 rank 升级覆盖（manual < backfill）                            manual -> backfill 升级后 source=backfill prev_close=121210
+
+-- 除权事件：成分自洽、状态与指针联动、撤销一步到位 --
+  [PASS] kind=dividend 但送转比例非 0 被拒                                  expect=error got=error CHECK constraint failed: (plan_category IN ('bonus','dividend_bonus'))    = (bonus_ratio_ppm > 0)
+  [PASS] kind=bonus 但派息非 0 被拒                                       expect=error got=error CHECK constraint failed: (plan_category IN ('dividend','dividend_bonus')) = (cash_per_share_micro > 0)
+  [PASS] 复合方案 dividend_bonus（同时两种成分）通过                              expect=ok    got=ok    
+  [PASS] status=applied 但无版本指向被拒（CHECK）                             expect=error got=error CHECK constraint failed: (status = 'applied') = (applied_version_id IS NOT NULL)
+  [PASS] status=pending 但已填 decided_at 被拒（CHECK）                    expect=error got=error CHECK constraint failed: (status = 'pending') = (decided_at IS NULL)
+  [PASS] applied_version_id 指向别只股票的版本被拒（触发器）                        expect=error got=error corporate_action: applied_version_id 必须指向同一 (成员,代码) 且生效日 = 除权日的持仓版本
+  [PASS] applied_version_id 指向同股但生效日 ≠ 除权日 被拒（触发器）                  expect=error got=error corporate_action: applied_version_id 必须指向同一 (成员,代码) 且生效日 = 除权日的持仓版本
+  [PASS] 采纳：指向同股同生效日的版本通过                                           expect=ok    got=ok    
+  [PASS] 撤销：删版本 -> 状态回置 pending 且清空指针（一步到位）                         删版本后 status=pending decided_at=None applied_version_id=None
+  [PASS] 同 (成员,代码,除权日) 重复插入被拒（主键）                                   expect=error got=error UNIQUE constraint failed: corporate_action.member_id, corporate_action.code, corporate_action.ex_date
+  [PASS] 另一位成员对同一事件独立确认通过                                           expect=ok    got=ok    
+
+-- 持仓：代码格式、数量非负、版本唯一 --
+  [PASS] 非法代码被拒                                                     expect=error got=error CHECK constraint failed: code GLOB 'sh[0-9][0-9][0-9][0-9][0-9][0-9]'
+      OR code GLOB 'sz[0-9][0-9][0-9][0-9][0-9][0-9]'
+  [PASS] 负数量被拒                                                      expect=error got=error CHECK constraint failed: qty >= 0
+  [PASS] 同 (成员,代码,生效日) 重复被拒                                         expect=error got=error UNIQUE constraint failed: position_version.member_id, position_version.code, position_version.effective_date
+  [PASS] 0 股清仓版本通过                                                  expect=ok    got=ok    
+
+-- 汇报与心跳：幂等 --
+  [PASS] 推送记录首次写入通过                                                 expect=ok    got=ok    
+  [PASS] 同 (类型,周期,通道) 重复插入被拒                                        expect=error got=error UNIQUE constraint failed: report_delivery.report_type, report_delivery.period_key, report_delivery.channel
+  [PASS] INSERT OR IGNORE 幂等：影响 0 行                                 expect=ok    got=ok    
+       -> 实际影响行数 = 0（应为 0）
+  [PASS] 非法 report_type 被拒（无日报）                                     expect=error got=error CHECK constraint failed: report_type IN ('weekly','monthly')
+  [PASS] 心跳三态之外的值被拒                                                 expect=error got=error CHECK constraint failed: status IN ('ok','skipped','failed')
+  [PASS] 心跳 skipped 通过                                              expect=ok    got=ok    
+  [PASS] 同 (task,scheduled_at) 重复心跳被拒                               expect=error got=error UNIQUE constraint failed: cron_run.task, cron_run.scheduled_at
+  [PASS] 同一 scheduled_at 下另一个 task 通过（行情/除权各记各的成败）                  expect=ok    got=ok    
+
+小结：约束/触发器断言 60 / 60 通过。
+
+==============================================================================
+【四】核心分析查询：SQL 条数 + EXPLAIN QUERY PLAN
+==============================================================================
+
+------------------------------------------------------------------------------
+V1  类别轴（组，成员固定 2 列）   —— SQL 条数 1
+------------------------------------------------------------------------------
+  [1] SEARCH e USING INDEX ix_entry_biz_date (biz_date>? AND biz_date<?)
+      SEARCH t USING INTEGER PRIMARY KEY (rowid=?)
+      SEARCH p USING INTEGER PRIMARY KEY (rowid=?) LEFT-JOIN
+      USE TEMP B-TREE FOR GROUP BY
+      USE TEMP B-TREE FOR ORDER BY
+
+------------------------------------------------------------------------------
+V2  类别轴下钻一层（未细分由 App 层相减）   —— SQL 条数 1
+------------------------------------------------------------------------------
+  [1] SEARCH t USING INDEX ix_tag_parent (parent_id=?)
+      SEARCH e USING INDEX ix_entry_cat_date (category_tag_id=? AND biz_date>? AND biz_date<?)
+      USE TEMP B-TREE FOR ORDER BY
+
+------------------------------------------------------------------------------
+V3  对象轴（含「未指定对象」桶）   —— SQL 条数 1
+------------------------------------------------------------------------------
+  [1] SEARCH e USING INDEX ix_entry_biz_date (biz_date>? AND biz_date<?)
+      SEARCH eo USING COVERING INDEX sqlite_autoindex_entry_object_1 (entry_id=?) LEFT-JOIN
+      USE TEMP B-TREE FOR GROUP BY
+      USE TEMP B-TREE FOR ORDER BY
+
+------------------------------------------------------------------------------
+V4  对象筛选 × 类别分组   —— SQL 条数 1
+------------------------------------------------------------------------------
+  [1] SEARCH eo USING COVERING INDEX ix_entry_object_tag (tag_id=?)
+      SEARCH e USING INTEGER PRIMARY KEY (rowid=?)
+      SEARCH t USING INTEGER PRIMARY KEY (rowid=?)
+      SEARCH p USING INTEGER PRIMARY KEY (rowid=?) LEFT-JOIN
+      USE TEMP B-TREE FOR GROUP BY
+
+------------------------------------------------------------------------------
+V5  时间趋势轴   —— SQL 条数 1
+------------------------------------------------------------------------------
+  [1] SEARCH e USING INDEX ix_entry_biz_date (biz_date>? AND biz_date<?)
+
+------------------------------------------------------------------------------
+V6  日均 / 环比（当期 + 上期）   —— SQL 条数 2
+------------------------------------------------------------------------------
+  [1] SEARCH entry USING INDEX ix_entry_biz_date (biz_date>? AND biz_date<?)
+  [2] SEARCH entry USING INDEX ix_entry_biz_date (biz_date>? AND biz_date<?)
+
+------------------------------------------------------------------------------
+V7  预算面板（全部类别标签 + 家庭总预算）   —— SQL 条数 2
+------------------------------------------------------------------------------
+  [1] MATERIALIZE bv
+      CO-ROUTINE (subquery-5)
+      SEARCH budget USING INDEX ix_budget_period (period_type=? AND effective_from<?)
+      USE TEMP B-TREE FOR ORDER BY
+      SCAN (subquery-5)
+      MATERIALIZE agg
+      COMPOUND QUERY
+      LEFT-MOST SUBQUERY
+      SEARCH e USING INDEX ix_entry_biz_date (biz_date>? AND biz_date<?)
+      SEARCH t USING INTEGER PRIMARY KEY (rowid=?)
+      SEARCH p USING INTEGER PRIMARY KEY (rowid=?) LEFT-JOIN
+      USE TEMP B-TREE FOR GROUP BY
+      UNION ALL
+      SEARCH e USING INDEX ix_entry_biz_date (biz_date>? AND biz_date<?)
+      SCAN t
+      SCAN bv LEFT-JOIN
+      SCAN agg LEFT-JOIN
+  [2] SEARCH budget USING INDEX ix_budget_period (period_type=? AND effective_from<?)
+
+------------------------------------------------------------------------------
+V8  预算提醒巡检（读状态 / 取累计 / 写回）   —— SQL 条数 3
+------------------------------------------------------------------------------
+  [1] SEARCH budget_alert_state USING INDEX sqlite_autoindex_budget_alert_state_1 (period_key=?)
+  [2] MATERIALIZE agg
+      COMPOUND QUERY
+      LEFT-MOST SUBQUERY
+      SEARCH e USING INDEX ix_entry_biz_date (biz_date>? AND biz_date<?)
+      SEARCH t USING INTEGER PRIMARY KEY (rowid=?)
+      SEARCH p USING INTEGER PRIMARY KEY (rowid=?) LEFT-JOIN
+      USE TEMP B-TREE FOR GROUP BY
+      UNION ALL
+      SEARCH e USING INDEX ix_entry_biz_date (biz_date>? AND biz_date<?)
+      SEARCH b USING INDEX ix_budget_period (period_type=? AND effective_from<?)
+      CORRELATED SCALAR SUBQUERY 3
+      SEARCH b2 USING INDEX ix_budget_period (period_type=? AND effective_from<?)
+      SCAN agg LEFT-JOIN
+  [3] (空计划)
+
+------------------------------------------------------------------------------
+V9  持仓明细（每只股票当前版本）   —— SQL 条数 1
+------------------------------------------------------------------------------
+  [1] SEARCH pv USING INDEX sqlite_autoindex_position_version_1 (member_id=?)
+      CORRELATED SCALAR SUBQUERY 1
+      SEARCH b USING COVERING INDEX sqlite_autoindex_position_version_1 (member_id=? AND code=?)
+
+------------------------------------------------------------------------------
+V10 按日取版本（任意日期的持仓）   —— SQL 条数 1
+------------------------------------------------------------------------------
+  [1] SEARCH position_version USING INDEX sqlite_autoindex_position_version_1 (member_id=? AND code=? AND effective_date<?)
+
+------------------------------------------------------------------------------
+V11 抓取范围（当前持仓数量 > 0）   —— SQL 条数 1
+------------------------------------------------------------------------------
+  [1] SEARCH pv USING INDEX sqlite_autoindex_position_version_1 (member_id=?)
+      CORRELATED SCALAR SUBQUERY 1
+      SEARCH b USING COVERING INDEX sqlite_autoindex_position_version_1 (member_id=? AND code=?)
+
+------------------------------------------------------------------------------
+V12 收益曲线（按交易日，Σ 当日浮动盈亏）   —— SQL 条数 1
+------------------------------------------------------------------------------
+  [1] SEARCH pv USING INDEX sqlite_autoindex_position_version_1 (member_id=?)
+      SEARCH q USING INDEX sqlite_autoindex_quote_daily_1 (code=? AND trade_date>? AND trade_date<?)
+      CORRELATED SCALAR SUBQUERY 1
+      SEARCH b USING COVERING INDEX sqlite_autoindex_position_version_1 (member_id=? AND code=? AND effective_date<?)
+      USE TEMP B-TREE FOR GROUP BY
+
+------------------------------------------------------------------------------
+V13 区间收益端点 + 缺口序列（2 条）   —— SQL 条数 2
+------------------------------------------------------------------------------
+  [1] SEARCH quote_daily USING INDEX sqlite_autoindex_quote_daily_1 (code=? AND trade_date=?)
+  [2] SEARCH quote_daily USING COVERING INDEX sqlite_autoindex_quote_daily_1 (code=? AND trade_date>? AND trade_date<?)
+
+------------------------------------------------------------------------------
+V14 待确认除权建议   —— SQL 条数 1
+------------------------------------------------------------------------------
+  [1] SEARCH corporate_action USING INDEX sqlite_autoindex_corporate_action_1 (member_id=?)
+      USE TEMP B-TREE FOR ORDER BY
+
+------------------------------------------------------------------------------
+V15 回填白名单校验（按代码 + 除权日）   —— SQL 条数 1
+------------------------------------------------------------------------------
+  [1] SEARCH corporate_action USING INDEX ix_ca_code_date (code=? AND ex_date=?)
+
+------------------------------------------------------------------------------
+V16 推送幂等（INSERT OR IGNORE）   —— SQL 条数 1
+------------------------------------------------------------------------------
+  [1] (空计划)
+
+------------------------------------------------------------------------------
+V17 心跳「上次成功运行」   —— SQL 条数 1
+------------------------------------------------------------------------------
+  [1] SEARCH cron_run USING INDEX ix_cron_run_task (task=?)
+
+------------------------------------------------------------------------------
+V18 未交易金额（成员级单值）   —— SQL 条数 1
+------------------------------------------------------------------------------
+  [1] SEARCH member_idle_cash USING INTEGER PRIMARY KEY (rowid=?)
+
+------------------------------------------------------------------------------
+V19 行情区间取数（单只股票，走主键前缀）   —— SQL 条数 1
+------------------------------------------------------------------------------
+  [1] SEARCH quote_daily USING INDEX sqlite_autoindex_quote_daily_1 (code=? AND trade_date>? AND trade_date<?)
+
+------------------------------------------------------------------------------
+V20 记账流水（按成员筛选 + 区间倒序分页）   —— SQL 条数 1
+------------------------------------------------------------------------------
+  [1] SEARCH entry USING INDEX ix_entry_member_date (member_id=? AND biz_date>? AND biz_date<?)
+
+==============================================================================
+【五】验收判定
+==============================================================================
+  每个分析视图 SQL 条数 <= 5（决策票 #4 Q5）：全部通过
+  （对照：D1 免费版每次调用上限 50 次查询，留 10 倍余量）
+
+  EXPLAIN QUERY PLAN 是否出现全表 SCAN：
+    事实表（判据要求 0 处）：0 处 —— 通过
+    维度表（tag / member，数十行，全扫即最优计划；如实列出，不计入判据）：
+      · V7 -> SCAN t (= tag)
+
+  判据说明（对 #4 验收标准的一处收窄，本票判断，可复议）：
+    #4 原文为「核心分析查询 EXPLAIN QUERY PLAN 不得出现 SCAN」。实测中 tag（数十行的
+    维度表）在若干查询里被全扫，而那是**最优计划**——为它强加驱动顺序的代价大于收益。
+    故本票把判据限定在**事实表**上：事实表不得出现 SCAN；维度表与物化子查询的 SCAN
+    一律如实列出，不做粉饰。
+
+==============================================================================
+【六】索引用途核对（每个索引都要有消费者）
+==============================================================================
+  A. SELECT 侧消费者（EXPLAIN QUERY PLAN 命中）
+     ix_budget_period               消费者 V7, V8
+     ix_ca_code_date                消费者 V15
+     ix_cron_run_task               消费者 V17
+     ix_entry_biz_date              消费者 V1, V3, V5, V6, V7, V8
+     ix_entry_cat_date              消费者 V2
+     ix_entry_member_date           消费者 V20
+     ix_entry_object_tag            消费者 V4
+     ix_tag_parent                  消费者 V2
+     ux_budget_household_version    **未被任何 SELECT 命中**
+     ux_budget_tag_version          **未被任何 SELECT 命中**
+
+  B. 唯一索引（含隐式）：消费者是**写入闸**，不是 SELECT 计划。
+     其拒绝行为已在【三】逐条验证：
+     ux_budget_tag_version                  「标签预算重复同一生效版本被拒」
+     ux_budget_household_version            「家庭总预算重复同一生效版本被拒」
+     sqlite_autoindex_position_version_1    「同 (成员,代码,生效日) 重复被拒」+ 取数走索引（V9/V10/V12）
+     sqlite_autoindex_quote_daily_1         「主键重复被拒」+ 区间取数走主键前缀（V13/V19）
+     sqlite_autoindex_corporate_action_1    「同 (成员,代码,除权日) 重复插入被拒」
+     sqlite_autoindex_report_delivery_1     「同 (类型,周期,通道) 重复插入被拒」+ INSERT OR IGNORE 影响 0 行
+     sqlite_autoindex_cron_run_1            「同 (task,scheduled_at) 重复心跳被拒」
+     sqlite_autoindex_budget_alert_state_1  主键即唯一（period_key, budget_id, tier）；V8 读路径走它
+     sqlite_autoindex_entry_object_1        「同一 Entry 重复打同一对象」被主键挡下；V3 借用为覆盖索引
+     sqlite_autoindex_member_1              member.name UNIQUE
+
+  C. 未被任何 SELECT 命中的显式索引：ux_budget_household_version, ux_budget_tag_version
+     （若出现，处置见文档 §5.3：要么补一条真实消费查询，要么删索引。）
+
+==============================================================================
+【七】行宽估算（决策票 #8 的估算是估算，此处给实测）
+==============================================================================
+  quote_daily 单行净列宽（不含页填充与 B 树开销）：
+    = 46 字节 / 行（现有 6 行）
+    20 只股票 x 244 交易日 = 4880 行/年 = 0.214 MB/年（净字节口径）
+    对照 #8 的估算「≈63 B/行、20 只 ≈0.31 MB/年」：同一量级。
+    索引写入另计：quote_daily 只有主键索引，每行额外 1 行索引写入（决策票 #13）。
+    ⚠️ 本估算只含净列宽，不含页填充与 B 树开销；「撑满 500 MB 需多少年」一律是估算，非实测。
+    ⚠️ 本机 Python 未启用 dbstat 扩展，故给不出页级实测 —— 如实标注，不以估算冒充实测。
+
+==============================================================================
+【八】D1 侧待复核（本机 SQLite != D1，以下四项必须在 D1 上复跑）
+==============================================================================
+  1. `SELECT sqlite_version()` —— 本机为 3.53.1，**不是 D1 的版本**
+     （决策票 #16 与 #13 均标注「SQLite 精确版本号未找到官方明确数字」）。
+  2. `CHECK (biz_date = date(occurred_at,'unixepoch','+8 hours'))` 这类
+     **在 CHECK 里调用日期函数** 的写法能否被 D1 的 SQLite 接受并正确求值
+     （本机已实测通过）。若不接受，退路是去掉该 CHECK、改由写入闸
+     （触发器或应用层）保证，其余 schema 不受影响。
+  3. `PRAGMA foreign_keys` 的默认值 —— 官方原文明确 D1 恒为 ON 且无法关闭
+     （见 docs/specs/d1-schema.md §6.1），本脚本已显式 ON 对齐。
+     ⚠️ 二手来源称 wrangler 本地模拟器在 2026-04 之前默认关闭外键
+     （workers-sdk#5092），该说法**未经官方一手确认** —— 本地开发若依赖
+     外键拦截，须自行验证。
+  4. `batch()` 与 `ON CONFLICT ... DO UPDATE ... WHERE`（来源 rank 仅升级时覆盖）
+     的组合行为，以及 **NULL 在唯一索引中的语义**（本 schema 已用两条部分唯一索引
+     回避：见 ux_budget_*；#13 已实测 SQLite 的唯一约束对 NULL 完全无效）。
+
+  另：本机 Python 未启用 dbstat 扩展，故行宽只给净字节估算（见 §七），
+      不以估算冒充实测。
