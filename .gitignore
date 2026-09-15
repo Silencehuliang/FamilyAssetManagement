@@ -1,0 +1,43 @@
+# ============================================================
+# 仓库为 PUBLIC —— 以下内容一律不得入库
+# ============================================================
+
+# ---- 依赖与构建产物 ----
+node_modules/
+dist/
+build/
+.vite/
+.wrangler/
+.dev.vars
+
+# ---- 密钥与本地配置 ----
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# ---- 家庭财务数据与导出物（隐私，绝不入库）----
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+*.db-wal
+exports/
+backup/
+seeds/
+*.csv
+
+# ---- 本地工作记忆与 wayfinder 发布暂存 ----
+# 如希望随仓库共享项目记忆，删除本行即可
+.workbuddy/
+
+# ---- 编辑器 / 系统 ----
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log
+npm-debug.log*
