@@ -1,0 +1,146 @@
+SQLITE_VERSION = 3.40.1
+DDL = migrations/0001_init.sql + migrations/0002_auth.sql
+
+PRAGMA foreign_keys = 1   <- 本机默认 OFF；此处显式对齐 D1（D1 恒为 ON 且无法关闭）
+DDL 执行：OK  0001_init.sql（19692 字符）
+DDL 执行：OK  0002_auth.sql（5965 字符）
+种子：member 2 行（恰 2 位，符合 0001 的领域约束）
+
+==============================================================================
+【一】结构盘点（含对 0001 的回归核对）
+==============================================================================
+  表 15 张：budget, budget_alert_state, corporate_action, cron_run, entry, entry_object, login_attempt, member, member_credential, member_idle_cash, position_version, quote_daily, report_delivery, session, tag
+  触发器 17 个
+  显式索引 11 个：ix_budget_period, ix_ca_code_date, ix_cron_run_task, ix_entry_biz_date, ix_entry_cat_date, ix_entry_member_date, ix_entry_object_tag, ix_session_member, ix_tag_parent, ux_budget_household_version, ux_budget_tag_version
+
+  对照 #14 的基线（12 表 / 16 触发器 / 10 显式索引）：
+    本票新增 3 表（member_credential, session, login_attempt）
+    本票新增 1 触发器（trg_credential_gen_kill_sessions）
+    本票新增 1 显式索引（ix_session_member）
+
+    ⚠️ 基线勘误：地图与 d1-schema.md 原先写「11 个显式索引」，实为 **10 个**。
+       本票在建立本比对时核对出该差错（0001_init.sql 共 10 条 CREATE INDEX：
+       8 个 ix_* + 2 个 ux_*），已在 d1-schema.md §10 留下更正记录。
+    实测：15 表 / 17 触发器 / 11 显式索引  ->  一致
+
+==============================================================================
+【二】为什么凭据必须是独立表（而不是给 member 加列）
+==============================================================================
+  [PASS] A4  ALTER TABLE member ADD COLUMN phc TEXT UNIQUE —— 预期被拒
+  [PASS] A5  ALTER TABLE member ADD COLUMN phc TEXT NOT NULL —— 预期被拒（无非空默认值）
+  -> SQLite 的 ADD COLUMN 既不能加 UNIQUE、也不能加无默认值的 NOT NULL 列，
+     故「每位成员恰好一条凭据」无法靠加列实现。这是独立表的硬依据。
+
+==============================================================================
+【三】约束断言
+==============================================================================
+  [PASS] B1  第 3 位成员被拒（0001 的领域约束仍在）
+  [PASS] B2  合法凭据写入通过
+  [PASS] B3  非 pbkdf2-sha256 前缀的 phc 被拒
+  [PASS] B3b 前缀正确但内容为空的 phc 通过（格式只保证前缀，内容由探针 E 段兜）
+  [PASS] B4  gen < 1 被拒
+  [PASS] B5  合法会话写入通过
+  [PASS] B6  重复 token_hash 被拒（唯一约束）
+  [PASS] B7  token_hash 长度不足被拒（防明文入库：明文 b64url 是 43 字符）
+  [PASS] B8  token_hash 含非 hex 字符被拒
+  [PASS] B9  归属不存在的成员被拒（外键）
+  [PASS] B10 滑动到期晚于绝对上限被拒
+  [PASS] B11 滑动到期早于签发时刻被拒
+  [PASS] B12 超长 ua_hint 被拒（>200 字符）
+  种子：member 1 有 1 条会话、member 2 有 1 条会话
+
+==============================================================================
+【四】触发器：改密码踢人，透明重哈希不踢人
+==============================================================================
+  变更前：member1 会话 1 条 / member2 会话 1 条
+  C1 改密码（gen+1）后：member1 会话 0 条  ->  PASS 已全部失效
+  C2 同时 member2 会话 1 条  ->  PASS 未受影响
+  C3 透明重哈希（换盐换迭代、gen 不变）后：member1 会话 1 条  ->  PASS 会话保留
+
+  -> 这条是本票 schema 里唯一一处「需要额外一列才能表达」的地方：
+     改密码与透明重哈希在 phc 上完全同形（都换了盐与散列），
+     只有整数世代 gen 能给出可判定的意图信号。
+
+==============================================================================
+【五】查询计划（每请求必跑的那条路径必须走索引）
+==============================================================================
+  V1 中间件鉴权（每请求）
+      SEARCH s USING INDEX sqlite_autoindex_session_1 (token_hash=?)
+  V2 登出所有设备 / 改密码清会话
+      SEARCH session USING COVERING INDEX ix_session_member (member_id=?)
+  V3 过期会话清理（挂每日 cron）
+      SCAN session
+  V4 限速读取（每次登录失败前）
+      SEARCH login_attempt USING INDEX sqlite_autoindex_login_attempt_1 (username=? AND ip=? AND bucket_at=?)
+  V5 限速桶清理（挂每日 cron）
+      SCAN login_attempt
+
+  EXPLAIN QUERY PLAN 出现全表 SCAN 的处：2
+      · V3 -> SCAN session
+      · V5 -> SCAN login_attempt
+
+  判据说明（沿用 #14 对「事实表不得全扫」的收窄，本票判断，可复议）：
+    V1/V2/V4 是**每请求或每次登录失败都会跑**的路径，必须走索引 —— 实测已走。
+    V3/V5 是每日 cron 的清理，命中 SCAN session / SCAN login_attempt。
+    本票**不修**，理由与 #14 对 tag 维度表的判断同构：这两张表的行数由
+    「设备数」「失败次数」决定而非由时间累积（过期行会被清掉），2 人自用为
+    个位数到几十行，全扫即最优计划。若未来行数上千，再补索引。
+
+==============================================================================
+【六】限速 upsert：写行数必须被钉在上界
+==============================================================================
+  连打 21 次失败：单键最终 n = 20，表内总行数 = 1
+  -> PASS 计数在 20 停住、且始终只占 1 行（未每次新增行）
+  [PASS] B13 直接插入 n=0 被拒（CHECK n>0）
+
+  ⚠️ 未证实项（官方文档无明确口径）：`INSERT ... ON CONFLICT DO UPDATE` 在 D1 的
+     `rows_written` 计为几行。官方只枚举了 INSERT / UPDATE / DELETE 各自按行计。
+     故「单键写行数有上界」这一条在**结构上成立**（本机实测只占 1 行），
+     但**在 D1 的计量口径上需实测**：上线前用响应里的 meta.rows_written 复核。
+
+==============================================================================
+【七】PBKDF2 的 phc 格式往返（本机实测，非 workerd）
+==============================================================================
+  生成的 phc：pbkdf2-sha256$20000$56TS6nYjbyGH2B8Cs1ytKw$zOpjFqRRQo8b2xDXLaEqT8qQjlGqzHPbll3o46209_E
+  长度 86 字符，字段数 4
+  E1 正确密码验回：PASS
+  E2 错误密码被拒：PASS
+
+  本机耗时（Python/OpenSSL，用于对照——非 workerd 的测量值）：
+    iter= 10000  median=4.30 ms
+    iter= 20000  median=8.52 ms
+    iter= 25000  median=10.61 ms
+    iter= 50000  median=21.53 ms
+    iter=100000  median=44.40 ms
+
+  对照 Node 侧同一基准（.workbuddy/tmp/wf/pbkdf2_bench.txt，i5-12400F）：
+    10000 -> 2.18 ms / 25000 -> 5.42 ms / 50000 -> 11.13 ms / 100000 -> 22.08 ms
+  ⇒ 两套实现量级一致，佐证「20,000 次 ≈ 4~5 ms」这个数量级。
+  ⚠️ 但**两者都不是 workerd（BoringSSL）**。20,000 这个取值必须在上线前
+     用线上观测到的 CPU 时间复核，允许区间 10,000–50,000（见契约 §7）。
+
+==============================================================================
+【八】D1 侧待复核（本机 SQLite != D1，以下各项必须在 D1 上复跑）
+==============================================================================
+  1. `SELECT sqlite_version()` —— 本机 3.40.1 不是 D1 的版本（#14 已列，仍未核实）。
+  2. **PBKDF2 迭代 20,000 次的真实 CPU 时间** —— workerd 用 BoringSSL，
+     与 OpenSSL 不同实现；且边缘 CPU 与本机 i5-12400F 不同。这是**本票最关键的
+     未证实项**：若线上 CPU 时间超 10 ms，需下调迭代次数（区间下限 10,000）。
+     官方与 workerd 仓库均无「迭代次数 → ms」的基准，只能自测。
+  3. `INSERT ... ON CONFLICT DO UPDATE ... WHERE` —— ① D1 是否接受该语法；
+     ② `meta.rows_written` 把它计为几行。本机实测只占 1 行、计数在 20 停住。
+  4. **中间件能否访问 D1 绑定** —— 官方文档只说明绑定经 `context.env` 在
+     「Function code」中访问，**未就 middleware 作专门表述**（#9 调研 §5 缺口）。
+     预期可行（middleware 的 onRequest 接收同一 EventContext），落地前验证一次。
+  5. `_routes.json` 是否真的把静态请求挡在 Functions 之外 —— 官方原文要求
+     「一旦加了 Functions，默认所有请求都会调用 Function」，须实测确认生效，
+     否则 10 万/天 的请求额度会被静态资源吃掉。
+  6. **iOS PWA 内的登录态** —— WebKit bug 272325（iOS 17+ PWA 内会话 cookie
+     偶发回退为旧值 ⇒ 随机登出）状态为 NEW。须在真机上验证，并确认前端的
+     401 兜底（跳登录页而非白屏）确实生效。
+
+==============================================================================
+【九】小结
+==============================================================================
+  断言失败数：0
+  表 15 / 触发器 17 / 显式索引 11；每请求路径（V1/V2/V4）全部走索引。

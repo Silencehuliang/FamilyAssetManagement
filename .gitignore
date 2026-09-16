@@ -19,6 +19,10 @@ build/
 *.p12
 *.pfx
 
+# ---- 鉴权的种入 / 重置产物（含密码哈希，绝不入库）----
+# 由 tools/make-credential.mjs 生成，见 docs/specs/auth-contract.md §6
+.secrets/
+
 # ---- 家庭财务数据与导出物（隐私，绝不入库）----
 *.sqlite
 *.sqlite3
