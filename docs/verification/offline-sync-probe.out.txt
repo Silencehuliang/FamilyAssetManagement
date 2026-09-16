@@ -1,0 +1,152 @@
+SQLITE_VERSION = 3.53.1
+DDL = migrations/0001_init.sql + 0002_auth.sql + 0003_offline.sql
+
+PRAGMA foreign_keys = 1   <- 本机默认 OFF；此处显式对齐 D1（D1 恒为 ON 且无法关闭）
+DDL 执行：OK  0001_init.sql（19692 字符）
+DDL 执行：OK  0002_auth.sql（5965 字符）
+种子：member 2 行 / tag 9 行 / entry 3 行（历史行，无 client_ref）/ entry_object 2 行
+DDL 执行：OK  0003_offline.sql（3003 字符）—— 在已有数据的表上加列并建唯一索引
+
+==============================================================================
+【一】结构盘点（含对 0001/0002 的回归核对）
+==============================================================================
+  表 15 张：budget, budget_alert_state, corporate_action, cron_run, entry, entry_object, login_attempt, member, member_credential, member_idle_cash, position_version, quote_daily, report_delivery, session, tag
+  触发器 18 个
+  显式索引 12 个：ix_budget_period, ix_ca_code_date, ix_cron_run_task, ix_entry_biz_date, ix_entry_cat_date, ix_entry_member_date, ix_entry_object_tag, ix_session_member, ix_tag_parent, ux_budget_household_version, ux_budget_tag_version, ux_entry_client_ref
+
+  基线链条：
+    #14 的 0001           12 表 / 16 触发器 / 10 显式索引
+    #9  的 0002 新增      +3 表 / +1 触发器 / +1 显式索引  ->  15 / 17 / 11
+    #10 的 0003 新增      +0 表 / +1 触发器 / +1 显式索引  ->  15 / 18 / 12
+    实测：15 表 / 18 触发器 / 12 显式索引  ->  一致
+  [PASS] client_ref 列已存在且类型为 TEXT  ->  'TEXT'
+
+==============================================================================
+【二】为什么必须「加列 + 索引 + 触发器」三步，而不是一条 DDL
+==============================================================================
+  [PASS] A1  ALTER TABLE entry ADD COLUMN x TEXT UNIQUE —— 预期被拒
+  [PASS] A2  ALTER TABLE entry ADD COLUMN x TEXT NOT NULL —— 预期被拒（无非空默认值）
+  -> SQLite 的 ADD COLUMN 既不能加 UNIQUE、也不能加无默认值的 NOT NULL 列，
+     故「client_ref 唯一且新行必填」无法靠一次加列实现。这是三步结构的硬依据。
+
+  A3/A4 在一张**独立的临时表**上演示（不在主库里留试验列）：
+    [PASS] A3  ADD COLUMN 带 CHECK —— 成功；既有行的 w 未被求值，值为 None
+    [PASS] A4  把既有行的 w 改成不合规值 —— 预期被 CHECK 拒
+    -> 结论：ADD COLUMN 时不对既有行求值，但**既有行之后一旦被 UPDATE 就会重新求值**。
+       0001 的 entry 表上已有 biz_date 的 CHECK，任何 UPDATE 都会重跑它 ——
+       故本迁移选择「触发器只管新写入」，语义边界比列上 CHECK 清晰可控。
+
+==============================================================================
+【三】client_ref 的语义
+==============================================================================
+  [PASS] B1  历史行（3 行）的 client_ref 全为 NULL  ->  3
+  [PASS] B2  唯一索引允许多行 NULL 共存（这是历史行能留下的前提）  ->  3
+  [PASS] B3  新写入不带 client_ref —— 预期被触发器拒
+  [PASS] B4  该 client_ref 此前不存在（重放的前置状态）  ->  0
+  第一次重放 client_ref=11111111-1111-4111-8111-111111111111
+  [PASS] B5  第一次重放后该 client_ref 恰好 1 行  ->  1
+  第二次重放同一 client_ref（模拟「超时后重试」）
+    entry 总行数：4 -> 4  ->  幂等命中，未重复插入
+  [PASS] B6  同一 client_ref 带不同内容重放 —— 不覆盖已写入的值（DO NOTHING 的语义）  ->  900
+  [PASS] B7  另一个 client_ref 正常写入  ->  1
+
+==============================================================================
+【四】重放幂等（entry + entry_object 全链路）
+==============================================================================
+  [PASS] C4  首次重放：entry 1 行 + 3 个对象  ->  3
+  [PASS] C5  二次重放同一批：对象仍是 3 行（未翻倍）  ->  3
+  -> 对象插入之所以不翻倍，靠的是语句里的 `AND NOT EXISTS (SELECT 1 FROM entry_object ...)`，
+     而**不是** `INSERT OR IGNORE` —— 理由见 §五（那一版的问题不是「吞错」，是语义不准）。
+  [PASS] C6  json_each 把 JSON 数组展开成 3 行  ->  3
+  [PASS] C7  一批 5 个对象 —— 预期仍被 trg_entry_object_limit 拒（应用层本应先拦）
+  [PASS] C8  被拒后对象表里该 entry 仍为 0 行（ABORT 回滚了整条语句）  ->  0
+
+==============================================================================
+【五】`INSERT OR IGNORE` 与触发器 `RAISE(ABORT)` 的交互（决定重放 SQL 的形态）
+==============================================================================
+  [PASS] D1  用 INSERT OR IGNORE 插入 5 个对象 —— 观察 ABORT 是否被吞掉
+      实际落库的对象行数 = 0
+      -> 结论（本机 3.53.1 实测）：`OR IGNORE` **不会**吞掉触发器里的 `RAISE(ABORT)` ——
+         ABORT 照常抛出，语句整体回滚，0 行都没进去。
+         即便如此，契约仍**不采用** OR IGNORE，理由有两条：
+           ① OR IGNORE 会吞掉**约束类**失败（主键/NOT NULL/CHECK），那正是「写入静默
+              不一致」的来源 —— 错误应显式暴露，而不是挑一半吞一半；
+           ② `AND NOT EXISTS (...)` 表达的是「这条还没插过」这个**意图**，语义比
+              「冲突就忽略」精确，且不依赖冲突解决算法的细节。
+
+==============================================================================
+【六】整批重放：为什么必须「先预校验、再写 batch」
+==============================================================================
+  场景：离线队列 3 条，其中第 2 条引用的类别标签已被删除（离线期间别人删的）。
+
+  E1  不做预校验，整批塞进一个事务  ->  error:IntegrityError，净增 0 行
+      -> 一条坏数据把整批拖下水。这就是**必须预校验**的实测依据。
+
+  E2  预校验（1 条 SQL）：有效 2 条 / 无效 1 条  ->  无效者：77777777
+  E3  只把有效的 2 条放进事务  ->  ok，净增 2 行
+  [PASS] E4  逐条结果：3 条中 2 条成功、1 条失败（失败被隔离，不阻塞其余）  ->  2
+      -> 一个请求：1 次预校验查询 + 1 个事务。失败的条目原样返回，不进事务。
+         ⚠️ 预校验与写入之间理论上存在竞态窗口（这中间标签被删）。2 人自用可忽略，
+            且此时事务会整体回滚、不会写入半条 —— 失败是显式的，不是静默的。
+
+==============================================================================
+【七】重放语句的数据访问路径（三条判据，附一处 EXPLAIN 误用的更正）
+==============================================================================
+
+  ⚠️ 先如实登记一处**本票自查踩到的误用**：
+     `EXPLAIN QUERY PLAN <INSERT>` **不能用来判断 INSERT 的数据访问路径** ——
+     它报告的是该表身上的**外键动作程序**。本机 SQLite 3.53.1 的对照实测：
+
+       INSERT INTO member              -> 6 行，全是「引用 member 的那些子表」的索引查找
+       INSERT INTO entry               -> 1 行：SEARCH entry_object（唯一引用 entry 的表）
+       INSERT INTO entry_object        -> 0 行（没有任何表引用它）
+       INSERT INTO budget_alert_state  -> 0 行（同上）
+
+     三者与「本语句查了哪些表」完全无关。探针最初版本正是在这里误用了它，
+     把外键程序当成了全扫证据 —— 那会让「不得全扫」这条判据变成空的。已更正。
+
+  判据一（最硬的一条）：ON CONFLICT 的冲突检测**必然**走唯一索引。
+    [PASS] 删掉 ux_entry_client_ref 后，同一语句无法编译：
+          error: ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint
+    已重建索引。-> ON CONFLICT(client_ref) 这个语义**本身就依赖该唯一索引**；
+       索引不存在它就编译不过 ⇒ 不存在「全表扫描找冲突」这条路径。
+
+  判据二：重放涉及的定点查询全部走索引（EXPLAIN QUERY PLAN 用在 SELECT 上是可靠的）
+    按 client_ref 取回 id     : SEARCH entry USING COVERING INDEX ux_entry_client_ref (client_ref=?)
+    按 client_ref 判重        : SEARCH entry USING COVERING INDEX ux_entry_client_ref (client_ref=?)
+    重放对象行定位 entry          : SEARCH e USING COVERING INDEX ux_entry_client_ref (client_ref=?)
+    重放对象行定位 entry          : CORRELATED SCALAR SUBQUERY 1
+    重放对象行定位 entry          : SEARCH eo USING COVERING INDEX sqlite_autoindex_entry_object_1 (entry_id=?)
+    重放对象行定位 entry          : SCAN j VIRTUAL TABLE INDEX 1:
+    （`SCAN j VIRTUAL TABLE INDEX` 是 json_each 展开 JSON 数组，属正常，不是表扫描。）
+
+  判据三：新增的唯一索引确实在写入路径上被维护（看 EXPLAIN 字节码）
+    字节码中 OP_IdxInsert 出现 4 次；entry 表上共有 4 个索引（ix_entry_cat_date, ix_entry_member_date, ix_entry_biz_date, ux_entry_client_ref），逐个维护。
+
+==============================================================================
+【八】索引用途核对（新增的唯一索引必须有消费者）
+==============================================================================
+  ux_entry_client_ref 的消费者：取回 id、离线去重查询、重放-插入对象
+
+  说明：与 0001 的两条 ux_budget_* 同属「由**写入闸**消费」的索引。
+        它的**主**消费者是重放语句里的 ON CONFLICT 目标 —— 而那一侧
+        无法用 EXPLAIN QUERY PLAN 呈现（§七 已实测并登记该局限），
+        故改用「删掉索引即无法编译」的反证（§七 判据一）。
+        上表列出的是它在**定点查询**上的可见消费者。
+
+==============================================================================
+【九】D1 侧待复核（本机 SQLite != D1，以下四项必须在 D1 上复跑）
+==============================================================================
+  1. `SELECT sqlite_version()` —— 本机 3.53.1 不是 D1 的版本（#14/#9 均标注此项未核实）。
+  2. `ALTER TABLE ... ADD COLUMN` 在 D1 的迁移流程里可用（D1 用 SQLite 的 ALTER 子集，
+     官方未列白名单）—— 若不可用，退路是「建新表 + 拷数据 + 改名」三步迁移。
+  3. `json_each()` 表值函数在 D1 可用（官方只笼统写「支持 JSON 函数」，未逐一点名）。
+     若不可用，退路是客户端把每个对象标签摊成一条 INSERT，放进同一个 batch。
+  4. `batch()` 的原子性与 `ON CONFLICT ... DO NOTHING` 的组合行为 ——
+     #14 已把「batch 与 ON CONFLICT 的组合」列为待复核项，本票沿用该结论。
+     本脚本的 §六 用事务模拟了 batch 的原子性，**D1 上必须复跑确认**。
+
+==============================================================================
+小结：断言失败 0 处
+==============================================================================
+  全部通过。
