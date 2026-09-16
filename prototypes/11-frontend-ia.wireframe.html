@@ -1,0 +1,1073 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>原型 · #11 前端信息架构 · 导航结构线框</title>
+<!--
+  ════════════════════════════════════════════════════════════════════════════
+  一次性产物（prototype）。用途：回答 #11 «前端信息架构与页面清单» 的导航结构问题。
+
+  它回答的问题：4 种导航形态里哪一种最合适；两套子系统（支出 / 股票）怎么并存；
+  三条高频路径各要几步；Web 为辅那一侧到底要不要分叉。
+
+  ⚠️ 这不是实现。没有真实数据、没有状态管理、没有持久化、没有错误处理。
+     样式刻意做成低保真（灰块 + 虚线框），为的是让人讨论结构而不是配色。
+     变体代码**不得**被直接提升为生产代码 —— 要按项目规范重写。
+
+  运行方式：浏览器直接打开本文件（零依赖、零构建）。
+
+  步数度量口径：见文件末尾 MEASURE 一节。它由本文件内的导航图经 BFS 算出，
+  可被任何人复跑（同一份代码 = 同一组数字）。**不是用户研究数据。**
+  ════════════════════════════════════════════════════════════════════════════
+-->
+<style>
+:root{
+  --bg:#14171c; --panel:#1b1f26; --line:#2a303a; --txt:#e6e9ee; --dim:#98a2b3;
+  --paper:#ffffff; --ink:#2b3038; --wfill:#eef0f3; --wline:#c9ced6; --wdash:#b9c0c9;
+  --accent:#5b8def; --warn:#d99a2b; --bad:#d96a6a; --ok:#3f9e73;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);
+  font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+a{color:var(--accent)}
+.topbar{position:sticky;top:0;z-index:30;background:var(--panel);border-bottom:1px solid var(--line);
+  padding:10px 16px;display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.topbar h1{font-size:13px;margin:0;font-weight:600;letter-spacing:.02em}
+.topbar .proto{font:11px ui-monospace,Menlo,Consolas,monospace;color:var(--warn);
+  border:1px dashed var(--warn);border-radius:3px;padding:1px 6px}
+.topbar .spacer{flex:1}
+.ctrl{display:flex;align-items:center;gap:6px;font:11px ui-monospace,Menlo,Consolas,monospace;color:var(--dim)}
+button.tg{background:#222832;color:var(--txt);border:1px solid var(--line);border-radius:3px;
+  padding:3px 8px;font:11px ui-monospace,Menlo,Consolas,monospace;cursor:pointer}
+button.tg:hover{border-color:#3b4560}
+button.tg.on{background:var(--accent);border-color:var(--accent);color:#0d1014;font-weight:600}
+.stage{display:flex;justify-content:center;padding:22px 16px 110px}
+.device{background:var(--paper);color:var(--ink);position:relative;overflow:hidden;
+  border:9px solid #0b0e12;border-radius:26px;box-shadow:0 22px 60px rgba(0,0,0,.55);
+  width:390px;height:790px;transition:width .18s,height .18s,border-radius .18s}
+.device.desktop{width:1120px;height:720px;border-radius:12px;border-width:1px;border-color:#39414d}
+.screen{position:absolute;inset:0;overflow:auto;background:#fff}
+.screen.dk{background:#fbfcfd}
+.pad{padding:12px 13px 96px}
+.pad.pc{padding:14px 18px 18px}
+
+/* ---- 低保真元件 ---- */
+.w{background:var(--wfill);border:1px solid var(--wline);border-radius:3px;
+  display:flex;align-items:center;justify-content:center;text-align:center;padding:2px}
+.wd{background:#f8f9fb;border:1px dashed var(--wdash);border-radius:3px;
+  display:flex;align-items:center;justify-content:center;text-align:center;padding:2px}
+.lb{font:11px/1.35 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#6b7480}
+.lb.on{color:#20242b;font-weight:600}
+.lb.mut{color:#9aa2ad}
+.sec{font:11px/1.4 ui-monospace,Menlo,Consolas,monospace;letter-spacing:.04em;color:#8a929d;
+  margin:14px 0 6px;text-transform:uppercase}
+.row{display:flex;gap:8px;align-items:center}
+.col{display:flex;flex-direction:column;gap:8px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+.tag{display:inline-flex;align-items:center;height:22px;padding:0 8px;border:1px solid var(--wline);
+  border-radius:11px;background:#f4f6f8;font:11px ui-monospace,Menlo,Consolas,monospace;color:#4d5561}
+.tag.sel{background:#dfe7f7;border-color:#9db4dd;color:#22365c}
+.tag.ghost{opacity:.42;text-decoration:line-through}
+.badge{display:inline-block;font:10px ui-monospace,Menlo,Consolas,monospace;padding:1px 5px;
+  border-radius:3px;border:1px solid currentColor}
+.b-pend{color:#2f6fd0;background:#e8f0fd}
+.b-fail{color:#b4483f;background:#fdeceb}
+.b-old{color:#8a6a12;background:#fdf6e3}
+.b-ok{color:#2b7a56;background:#e9f6ef}
+.b-mut{color:#7b838e;background:#f1f3f6}
+.dis{opacity:.38;position:relative}
+.dis::after{content:'';position:absolute;inset:0;background:repeating-linear-gradient(45deg,
+  transparent,transparent 5px,rgba(120,130,145,.13) 5px,rgba(120,130,145,.13) 6px);border-radius:3px}
+.note{font:11px/1.45 ui-monospace,Menlo,Consolas,monospace;color:#7b838e}
+.note.warn{color:#a9772a}
+.note.bad{color:#b4483f}
+.why{font:10px/1.4 ui-monospace,Menlo,Consolas,monospace;color:#b4483f;margin-top:3px}
+.wbar{height:10px;background:#e7eaee;border-radius:5px;overflow:hidden;position:relative}
+.wbar > i{display:block;height:100%;background:#aeb9c7}
+.thr{position:absolute;top:-3px;bottom:-3px;width:2px;background:#c9a02e}
+.thr.b{background:#c0564d}
+table.t{width:100%;border-collapse:collapse;font:11px ui-monospace,Menlo,Consolas,monospace}
+table.t th,table.t td{border:1px solid #e2e6eb;padding:4px 6px;text-align:left;color:#4d5561}
+table.t th{background:#f4f6f8;color:#6b7480;font-weight:600}
+table.t td.num{text-align:right}
+.virt{font-style:italic;color:#8a929d}
+.fin{width:100%;height:50px;font:22px ui-monospace,Menlo,Consolas,monospace;color:#20242b;
+  background:var(--wfill);border:1px solid var(--wline);border-radius:3px;padding:0 10px;text-align:right}
+.fin::placeholder{color:#9aa2ad}
+
+/* ---- 壳：Tab 栏 / 顶部栏 / 抽屉 ---- */
+.tabbar{position:absolute;left:0;right:0;bottom:0;height:54px;display:flex;
+  border-top:1px solid #e4e8ed;background:#fcfdfe;z-index:6}
+.tabbar .tb{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+  font:10px ui-monospace,Menlo,Consolas,monospace;color:#8a929d;border:0;background:none;cursor:pointer;padding:0}
+.tabbar .tb .dot{width:18px;height:18px;border:1px solid #c9ced6;border-radius:5px;background:#eef0f3}
+.tabbar .tb.on{color:#20242b;font-weight:600}
+.tabbar .tb.on .dot{background:#cfd9ea;border-color:#9db4dd}
+.tabbar .tb.raise .dot{width:38px;height:30px;border-radius:9px;background:#dbe4f4;border-color:#9db4dd}
+.topnav{position:absolute;left:0;right:0;top:0;height:46px;z-index:6;background:#fcfdfe;
+  border-bottom:1px solid #e4e8ed;display:flex;align-items:center;gap:10px;padding:0 12px}
+.topnav .hamb{width:26px;height:22px;border:1px solid var(--wline);border-radius:3px;background:#eef0f3;
+  cursor:pointer;display:flex;align-items:center;justify-content:center;font:12px monospace;color:#5b6472}
+.topnav .ttl{font:12px ui-monospace,Menlo,Consolas,monospace;color:#3b434e;font-weight:600}
+.backbtn{border:1px solid var(--wline);background:#f4f6f8;border-radius:3px;padding:1px 7px;
+  font:11px ui-monospace,Menlo,Consolas,monospace;color:#5b6472;cursor:pointer}
+.drawer{position:absolute;top:0;bottom:0;left:0;width:74%;background:#f7f9fb;z-index:20;
+  border-right:1px solid #dfe4ea;padding:14px 12px;overflow:auto;box-shadow:6px 0 22px rgba(20,25,35,.16)}
+.drawer h4{margin:0 0 10px;font:11px ui-monospace,Menlo,Consolas,monospace;color:#8a929d;font-weight:600}
+.ditem{display:flex;align-items:center;justify-content:space-between;gap:8px;
+  border:1px solid var(--wline);background:#fff;border-radius:4px;padding:8px 10px;margin-bottom:6px;
+  font:12px monospace;color:#3b434e;cursor:pointer}
+.ditem.d2{margin-left:14px;background:#fbfcfd}
+.ditem .dep{font:10px monospace;color:#9aa2ad}
+.seg{display:flex;border:1px solid var(--wline);border-radius:5px;overflow:hidden;background:#f4f6f8;margin:8px 0}
+.seg button{flex:1;border:0;background:none;padding:6px 0;font:11px ui-monospace,Menlo,Consolas,monospace;
+  color:#6b7480;cursor:pointer}
+.seg button.on{background:#dbe4f4;color:#22365c;font-weight:600}
+.banner{border:1px solid #9db4dd;background:#eef3fc;border-radius:4px;padding:7px 9px;margin-bottom:8px;
+  font:11px/1.45 ui-monospace,Menlo,Consolas,monospace;color:#2b4c85}
+.banner.sw{border-color:#bcae86;background:#fdf8ec;color:#7a6425}
+.banner.ios{border-color:#a9bda9;background:#eef6ef;color:#3c6144}
+.banner .x{float:right;cursor:pointer;color:#8a929d}
+.acts{position:absolute;left:0;right:0;bottom:0;padding:10px 13px;background:linear-gradient(#ffffff00,#fff 28%);
+  z-index:5;display:flex;gap:8px}
+.acts button{flex:1;border:1px solid #9db4dd;background:#dbe4f4;border-radius:6px;padding:10px 0;
+  font:12px ui-monospace,Menlo,Consolas,monospace;color:#22365c;font-weight:600;cursor:pointer}
+.acts button.sec2{border-color:var(--wline);background:#f4f6f8;color:#5b6472;font-weight:400;flex:0 0 96px}
+
+/* ---- 切换器（不属于被评测的设计） ---- */
+.switcher{position:fixed;left:50%;transform:translateX(-50%);bottom:18px;z-index:40;
+  display:flex;align-items:center;gap:10px;background:#0b0e12;border:1px solid #3a4256;
+  border-radius:999px;padding:7px 12px;box-shadow:0 10px 30px rgba(0,0,0,.6)}
+.switcher button{width:26px;height:26px;border-radius:50%;border:1px solid #3a4256;background:#1b1f26;
+  color:var(--txt);cursor:pointer;font:12px monospace}
+.switcher .vl{font:11px ui-monospace,Menlo,Consolas,monospace;color:var(--txt);min-width:176px;text-align:center}
+.switcher .vl b{color:#8fb0ef}
+
+/* ---- 度量面板 ---- */
+.mpanel{position:fixed;right:14px;top:64px;z-index:35;width:352px;max-height:76vh;overflow:auto;
+  background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:12px 13px;
+  box-shadow:0 12px 34px rgba(0,0,0,.5)}
+.mpanel h3{margin:0 0 8px;font:11px ui-monospace,Menlo,Consolas,monospace;color:var(--warn);letter-spacing:.04em}
+.mpanel table{width:100%;border-collapse:collapse;font:11px ui-monospace,Menlo,Consolas,monospace}
+.mpanel th,.mpanel td{border:1px solid var(--line);padding:3px 5px;text-align:left;color:var(--dim)}
+.mpanel th{color:#c3cad6;background:#222832}
+.mpanel td.v{text-align:right;color:var(--txt)}
+.mpanel td.best{color:#6fcf9d;font-weight:600}
+.mpanel td.worst{color:#e0897f}
+.mpanel p{font:11px/1.5 ui-monospace,Menlo,Consolas,monospace;color:var(--dim);margin:8px 0 0}
+.mpanel .hint{color:#7f8896}
+.tracebox{font:11px/1.5 ui-monospace,Menlo,Consolas,monospace;color:#c3cad6;background:#222832;
+  border:1px solid var(--line);border-radius:4px;padding:6px 8px;margin-top:8px;word-break:break-all}
+.toggle-panel{position:fixed;right:14px;top:64px;z-index:36}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <h1>#11 前端信息架构 · 导航结构线框</h1>
+  <span class="proto">PROTOTYPE · 一次性产物 · 非实现</span>
+  <span class="spacer"></span>
+  <div class="ctrl">
+    <span>网络</span>
+    <button class="tg on" id="tg-net">在线</button>
+    <span>队列</span>
+    <button class="tg" id="tg-q">0</button>
+    <span>新版本</span>
+    <button class="tg" id="tg-sw">无</button>
+    <span>视口</span>
+    <button class="tg" id="tg-vp">手机</button>
+    <button class="tg on" id="tg-m">度量</button>
+  </div>
+</div>
+
+<div class="stage"><div class="device" id="device"></div></div>
+
+<div class="mpanel" id="mpanel"></div>
+
+<div class="switcher">
+  <button id="prev" title="上一个变体（← 键）">‹</button>
+  <span class="vl" id="vl"></span>
+  <button id="next" title="下一个变体（→ 键）">›</button>
+</div>
+
+<script>
+'use strict';
+
+/* ══════════════════════════════════════════════════════════════════════════
+   0. 全局开关（原型用的假状态，全在内存里，刷新即重置）
+   ══════════════════════════════════════════════════════════════════════════ */
+var ST = {
+  online: true,      // 在线 / 离线
+  queue: 2,          // 待同步条数（0..3 循环）
+  swUpdate: false,   // 是否有新版本待更新
+  desktop: false,    // 手机 / 桌面视口
+  panel: true,       // 度量面板
+  variant: 'A',
+  page: 'home',
+  seg: {},           // 各变体的分段控件状态（B 的资产页）
+  drawer: false,
+  taps: 0,           // 用户实际点击数（自由玩耍用）
+  trace: [],         // 用户实际点击路径
+  saved: null,       // 上一次保存的结果（原型用）
+  guided: false      // 安装引导是否已被永久关闭
+};
+
+/* ══════════════════════════════════════════════════════════════════════════
+   1. 低保真元件
+   ══════════════════════════════════════════════════════════════════════════ */
+function wf(h, label, extra) {
+  return '<div class="w" style="height:' + h + 'px;' + (extra || '') + '">' +
+    (label ? '<span class="lb">' + label + '</span>' : '') + '</div>';
+}
+function dash(h, label, extra) {
+  return '<div class="wd" style="height:' + h + 'px;' + (extra || '') + '">' +
+    (label ? '<span class="lb mut">' + label + '</span>' : '') + '</div>';
+}
+function sec(t) { return '<div class="sec">' + t + '</div>'; }
+function note(t, cls) { return '<div class="note ' + (cls || '') + '">' + t + '</div>'; }
+function tag(t, cls) { return '<span class="tag ' + (cls || '') + '">' + t + '</span>'; }
+function badge(t, cls) { return '<span class="badge ' + cls + '">' + t + '</span>'; }
+function qbadge() {
+  if (ST.queue <= 0) return '';
+  return ' ' + badge('待同步 ' + ST.queue, 'b-pend');
+}
+
+/* 图表占位：本票只定「哪里放什么图」，库选型留在雾区 */
+function chart(h, caption) {
+  return '<div class="wd" style="height:' + h + 'px;flex-direction:column;gap:4px">' +
+    '<span class="lb mut">［图］</span><span class="lb mut">' + caption + '</span></div>';
+}
+
+/* 离线置灰：必须说明原因，不能只灰不说（#10 派生要求 5） */
+function disabled(h, reason) {
+  return '<div class="dis" style="border-radius:4px">' + h + '</div>' +
+    '<div class="why">离线不可用 · ' + reason + '</div>';
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   2. 页面（屏幕内容）—— 四个变体共用同一套内容，变体只换导航壳与可达深度
+      所有字段、单位、口径均来自已冻结的上游决策
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* 全局横幅（条件渲染）—— #10 派生要求 1 / 4 / 7 */
+function banners() {
+  var o = '';
+  if (!ST.online && ST.queue > 0) {
+    o += '<div class="banner">离线 · 另有 ' + ST.queue + ' 条待同步未计入汇总 <span class="x" data-go="queue">查看 ›</span></div>';
+  }
+  if (ST.swUpdate) {
+    var q = ST.queue > 0 ? '（含 ' + ST.queue + ' 条待同步）' : '';
+    o += '<div class="banner sw">有新版本可用' + q + '　刷新不会丢失待同步记录' +
+      '<span class="x" data-go="home">更新</span></div>';
+  }
+  /* iOS 安装引导：已登录 + 非 standalone + 从未引导过 ⇒ 一次性、可永久关闭 */
+  if (!ST.desktop && !ST.guided) {
+    o += '<div class="banner ios">把这个站加到主屏幕更好用：分享 → 添加到主屏幕' +
+      '<span class="x" data-guide="1">关闭</span></div>';
+  }
+  return o;
+}
+
+/* 全局「待同步」指示器 —— #10 派生要求 1（任一页面可见） */
+function pendIndicator() {
+  if (ST.queue <= 0) return '';
+  return '<div class="row" style="justify-content:space-between;margin:2px 0 8px">' +
+    '<span class="lb mut">' + (ST.online ? '在线' : '离线') + '</span>' +
+    '<span class="lb on" data-go="queue" style="cursor:pointer">待同步 ' + ST.queue + ' 条 ›</span></div>';
+}
+
+var SCR = {};
+
+/* ---- 登录页（唯一未认证页面；没有注册页） ---- */
+SCR.login = function () {
+  return '<div class="pad" style="padding-top:64px">' +
+    '<div style="text-align:center;margin-bottom:26px">' +
+    wf(46, '家庭财务', 'width:150px;margin:0 auto;font-weight:600') +
+    '</div>' +
+    '<div class="col">' +
+    wf(38, '用户名') + wf(38, '密码') +
+    '</div>' +
+    '<div class="row" style="margin-top:10px">' +
+    wf(34, '登 录', 'flex:1;background:#cfd9ea;border-color:#9db4dd') + '</div>' +
+    '<div style="margin-top:18px">' +
+    note('· 无「注册」入口 —— 这个端点不存在，不是被禁用') +
+    note('· 失败固定延迟 500ms；不区分「用户不存在」与「密码错」') +
+    note('· 首次在 PWA 里打开要登录一次（与 Safari 是两套容器）') +
+    '</div></div>';
+};
+
+/* ---- 首页 ---- */
+SCR.home = function (v) {
+  var s = '<div class="pad">';
+  s += '<div class="row" style="justify-content:space-between">' +
+    '<div><div class="lb on" style="font-size:13px">胡先森</div>' +
+    '<div class="note">本月 · 2026-09（CST 自然月）</div></div>' +
+    '<div>' + (ST.online ? badge('在线', 'b-ok') : badge('离线', 'b-mut')) + '</div></div>';
+  s += sec('本月总支出');
+  s += wf(52, '¥ 8,432.50', 'font-size:20px');
+  s += sec('预算（家庭总预算）');
+  s += '<div class="wbar" style="margin:2px 0 4px"><i style="width:62%"></i>' +
+    '<span class="thr" style="left:80%"></span><span class="thr b" style="left:100%"></span></div>';
+  s += note('已用 62% · 预警线 80%（消耗 ≥ 上限×阈值）· 超支线 100%');
+  s += note('超支不阻断录入，仅标记 + 非阻塞提示');
+  if (!ST.online && ST.queue > 0) {
+    s += note('离线时汇总只显示缓存值，队列项不计入 —— 不复刻服务端聚合口径', 'warn');
+  }
+  s += sec('类别 Top 5（当前基线解释，实时聚合）');
+  var cats = [['餐饮', 34], ['住房', 26], ['出行', 15], ['医疗', 9], ['其他', 6]];
+  s += '<div class="col" style="gap:5px">';
+  for (var i = 0; i < cats.length; i++) {
+    s += '<div class="row"><span class="lb" style="width:42px">' + cats[i][0] + '</span>' +
+      '<div class="wbar" style="flex:1"><i style="width:' + cats[i][1] + '%"></i></div>' +
+      '<span class="lb mut" style="width:30px;text-align:right">' + cats[i][1] + '%</span></div>';
+  }
+  s += '</div>';
+  s += sec('入口');
+  if (v === 'C') {
+    /* 变体 C：首页即聚合入口，二级页都从这里进 */
+    s += '<div class="grid2">' +
+      wf(60, '流水') + wf(60, '支出分析') +
+      wf(60, '预算') + wf(60, '股票持仓') +
+      wf(60, '收益趋势') + wf(60, '标签管理') +
+      wf(60, '除权确认') + wf(60, '设置') +
+      '</div>';
+  } else {
+    s += '<div class="grid3">' + wf(58, '流水') + wf(58, '支出分析') + wf(58, '预算') + '</div>' +
+      '<div class="grid3" style="margin-top:8px">' + wf(58, '股票持仓') + wf(58, '收益趋势') + wf(58, '标签管理') + '</div>';
+  }
+  s += sec('运行状态（心跳表 cron_run）');
+  s += '<table class="t"><tr><th>task</th><th>上次成功运行</th><th>状态</th></tr>' +
+    '<tr><td>quote</td><td>2026-09-16 07:30</td><td>' + badge('ok', 'b-ok') + '</td></tr>' +
+    '<tr><td>corporate_action</td><td>2026-09-16 07:30</td><td>' + badge('skipped', 'b-mut') + '</td></tr>' +
+    '<tr><td>budget_alert</td><td>2026-09-15 20:00</td><td>' + badge('ok', 'b-ok') + '</td></tr>' +
+    '</table>';
+  s += note('行情与除权是两行心跳 ⇒ 必须按 task 分别问「上次成功」，不能取全局最大');
+  s += note('⚠️ scheduled_at 是 UTC 毫秒，其余时间列是 UTC 秒 —— 格式化不要一把梭', 'warn');
+  s += '</div>';
+  return s;
+};
+
+/* ---- 流水列表 ---- */
+SCR.ledger = function () {
+  var s = '<div class="pad">';
+  s += sec('筛选');
+  s += '<div class="row" style="flex-wrap:wrap;gap:6px">' +
+    tag('成员：全部', 'sel') + tag('区间：本月') + tag('类别：全部') + '</div>';
+  s += note('按成员 + 区间倒序分页走 ix_entry_member_date（已索引）');
+  s += sec('流水');
+  var rows = [
+    ['09-16', '餐饮', '孩子', '¥ 128.00', 'pend'],
+    ['09-16', '出行', '我', '¥ 24.50', ''],
+    ['09-15', '住房', '—', '¥ 3,200.00', ''],
+    ['09-15', '医疗', '老人', '¥ 86.30', 'fail'],
+    ['09-14', '其他', '—', '¥ 15.00', 'old']
+  ];
+  s += '<div class="col" style="gap:6px">';
+  for (var i = 0; i < rows.length; i++) {
+    var r = rows[i], b = '';
+    if (r[4] === 'pend') b = badge('待同步', 'b-pend');
+    if (r[4] === 'fail') b = badge('同步失败', 'b-fail');
+    if (r[4] === 'old') b = badge('长期未同步', 'b-old');
+    var box = r[4] === 'pend' ? 'background:#eaf1fc;border-color:#a9c0e4' : '';
+    s += '<div class="w" style="height:44px;justify-content:space-between;padding:0 9px;gap:8px;' + box + '">' +
+      '<span class="lb on" style="width:34px">' + r[0] + '</span>' +
+      '<span class="lb" style="flex:1;text-align:left">' + r[1] + ' · ' + r[2] + '</span>' +
+      '<span class="lb" style="width:74px;text-align:right">' + r[3] + '</span>' +
+      '<span style="width:66px;text-align:right">' + b + '</span></div>';
+  }
+  s += '</div>';
+  s += note('待同步项与已同步项必须可区分（#10 派生要求 2）');
+  s += sec('编辑入口');
+  if (ST.online) { s += wf(34, '点击某行 → 详情 / 编辑 / 删除'); }
+  else { s += disabled(wf(34, '点击某行 → 详情'), '编辑 / 删除 Entry 需要在线'); }
+  s += '</div>';
+  return s;
+};
+
+/* ---- 记一笔（最高频） ---- */
+SCR.entry = function () {
+  var s = '<div class="pad">';
+  if (ST.saved) {
+    s += '<div class="banner" style="border-color:#a9bda9;background:#eef6ef;color:#3c6144">' +
+      '已保存（原型）· 变体 ' + ST.saved.v + ' 从首页到此共 ' + ST.saved.n + ' 步　' +
+      '<span class="x" data-act="clearsave">重来</span></div>';
+  }
+  s += sec('金额（type=text + inputmode=decimal）');
+  s += '<input class="fin" type="text" inputmode="decimal" placeholder="0.00" value="">';
+  s += note('不用 type=number：忽略 pattern、step 默认 1、允许 e/+/-');
+  s += note('字符串算整数分，禁用 parseFloat(x)*100；同时接受 . 与 ,');
+  s += sec('类别（必填，单值 ⇒ 总支出无重复计数）');
+  s += '<div class="row" style="flex-wrap:wrap;gap:6px">' +
+    tag('餐饮', 'sel') + tag('住房') + tag('出行') + tag('医疗') + tag('其他') +
+    tag('＋ 自建') + '</div>';
+  s += note('默认集 5 个完全不可变；场景化标签来自可选模板包');
+  s += sec('对象（横切标签，≤ 4）');
+  s += '<div class="row" style="flex-wrap:wrap;gap:6px">' +
+    tag('我') + tag('孩子', 'sel') + tag('老人') + tag('宠物') + '</div>';
+  s += sec('谁花的（默认 = GET /api/session 返回的成员）');
+  s += '<div class="seg"><button class="on">胡先森</button><button>家人</button></div>';
+  s += note('不支持代记：录入者恒等于归属成员');
+  s += sec('发生时间');
+  s += wf(34, '2026-09-16 14:05（默认现在，不可指向未来）');
+  s += note('补记不设上限；biz_date 由 CST 换算，趋势轴按它分组');
+  s += sec('备注（可选）');
+  s += wf(34, '—');
+  s += sec('本地模板（设备侧 IndexedDB，不进备份）');
+  s += '<div class="row" style="flex-wrap:wrap;gap:6px">' +
+    tag('房租 3200 · 住房') + tag('通勤 24.5 · 出行') + tag('＋ 存为模板') + '</div>';
+  s += sec('常用标签置顶（服务端实时算：最近 20 笔频次，不建汇总表）');
+  s += '<div class="row" style="flex-wrap:wrap;gap:6px">' + tag('餐饮·孩子') + tag('出行·我') + '</div>';
+  s += sec('待同步预览');
+  s += ST.online
+    ? note('在线：点保存即直传。幂等键 client_ref 在打开本表单时生成一次，重试复用同值')
+    : note('离线：入队列（IndexedDB）。超 5 分钟容差的未来时间会被拒并标红，不静默改写', 'warn');
+  s += '</div>';
+  s += '<div class="acts"><button data-act="save">保存</button>' +
+    '<button class="sec2" data-go="home">取消</button></div>';
+  return s;
+};
+
+/* ---- 支出分析 ---- */
+SCR.expense = function () {
+  var axis = ST.seg.axis || '类别';
+  var s = '<div class="pad">';
+  if (!ST.online) {
+    s += '<div class="banner">离线不可用：分析页筛选组合开放，缓存必然大量未命中' +
+      '　<span class="x" data-go="home">返回</span></div>';
+  }
+  s += '<div class="seg">' +
+    '<button class="' + (axis === '类别' ? 'on' : '') + '" data-axis="类别">按类别</button>' +
+    '<button class="' + (axis === '对象' ? 'on' : '') + '" data-axis="对象">按对象</button>' +
+    '<button class="' + (axis === '时间' ? 'on' : '') + '" data-axis="时间">按时间趋势</button>' +
+    '</div>';
+  s += note('分组轴三选一 × 成员固定 2 列；不做多维矩阵');
+  s += sec('筛选');
+  s += '<div class="row" style="flex-wrap:wrap;gap:6px">' + tag('区间：本月') + tag('下钻：关') + '</div>';
+  s += sec('数据');
+  if (axis === '时间') {
+    s += chart(120, '折线 · 日度趋势（分母 = 当期已过天数）');
+  } else {
+    s += '<table class="t"><tr><th>' + axis + '</th><th class="num">胡先森</th><th class="num">家人</th><th class="num">合计</th><th class="num">占比</th></tr>' +
+      '<tr><td>餐饮</td><td class="num">1,240.00</td><td class="num">980.00</td><td class="num">2,220.00</td><td class="num">26%</td></tr>' +
+      '<tr><td>住房</td><td class="num">3,200.00</td><td class="num">—</td><td class="num">3,200.00</td><td class="num">38%</td></tr>' +
+      '<tr><td>出行</td><td class="num">860.00</td><td class="num">420.00</td><td class="num">1,280.00</td><td class="num">15%</td></tr>' +
+      '<tr><td class="virt">未细分</td><td class="num">—</td><td class="num">—</td><td class="num">0.00</td><td class="num">0%</td></tr>' +
+      '<tr><td class="virt">未指定对象</td><td class="num">410.00</td><td class="num">—</td><td class="num">410.00</td><td class="num">5%</td></tr>' +
+      '</table>';
+    s += note('父行 = 自身直挂 + 全体后代；虚拟行「未细分」保证求和守恒');
+    s += note('对象维度重复计数为设计允许，显式给「未指定对象」桶');
+    s += '<div style="margin-top:8px">' + chart(96, '占比图 · 类别 / 对象（仅一层）') + '</div>';
+    s += '<div class="row" style="margin-top:8px">' + wf(30, '上期对比：无上期数据', 'flex:1') + '</div>';
+    s += note('上期无数据不给变化率，显示「无上期数据」，不显示 0% 或 —');
+    s += '<div style="margin-top:8px">' + wf(30, '下钻一层 →（下钻后可再进入下一层）') + '</div>';
+  }
+  s += note('每个分析视图 ≤ 5 条 SQL；全实时聚合、无汇总表');
+  s += '</div>';
+  return s;
+};
+
+/* ---- 预算 ---- */
+SCR.budget = function () {
+  var s = '<div class="pad">';
+  s += sec('家庭总预算（口径 = 总支出，至多一条）');
+  s += '<div class="w" style="height:62px;flex-direction:column;gap:5px">' +
+    '<span class="lb on">本月 ¥ 12,000.00 · 已用 ¥ 6,300.00</span>' +
+    '<div class="wbar" style="width:88%"><i style="width:52%"></i>' +
+    '<span class="thr" style="left:80%"></span><span class="thr b" style="left:100%"></span></div></div>';
+  s += sec('按标签（父 = 子树合计；父子各自独立、互不扣减）');
+  s += '<div class="col" style="gap:7px">' +
+    '<div class="w" style="height:40px;justify-content:space-between;padding:0 9px"><span class="lb on">住房</span><span class="lb">¥3,200 / ¥3,500</span><span>' + badge('91%', 'b-fail') + '</span></div>' +
+    '<div class="w" style="height:40px;justify-content:space-between;padding:0 9px"><span class="lb on">餐饮</span><span class="lb">¥2,220 / ¥3,000</span><span>' + badge('74%', 'b-ok') + '</span></div>' +
+    '<div class="w" style="height:40px;justify-content:space-between;padding:0 9px"><span class="lb on">出行</span><span class="lb">¥1,280 / ¥1,000</span><span>' + badge('128% 超支', 'b-fail') + '</span></div>' +
+    '</div>';
+  s += note('「子超支、父未超支」是合法状态；超支不阻断录入');
+  s += sec('变更');
+  s += wf(34, '修改预算（自下一期生效）');
+  s += note('预算按生效区间版本化；已结束当期按当时版本判定，永不追溯改写');
+  s += note('提醒两档 80% / 100%，每条可覆盖阈值；跨档补齐靠 budget_alert_state');
+  s += '</div>';
+  return s;
+};
+
+/* ---- 股票持仓 ---- */
+SCR.stock = function () {
+  var s = '<div class="pad">';
+  s += '<div class="seg"><button class="on">全部</button><button>胡先森</button><button>家人</button></div>';
+  if (!ST.online) {
+    s += '<div class="banner">离线显示 · 行情截至 2026-09-15（缓存于 2026-09-16 09:12）</div>';
+    s += note('双时间戳缺一不可：只给数据日期会以为是刚拉的，只给缓存时刻会以为是实时价');
+  }
+  s += sec('行情缺口');
+  s += '<div class="banner">缺 2 个交易日：2026-09-14、2026-09-15　' +
+    '<b>先补数</b>　<span data-go="home">手工录价 ›</span></div>';
+  s += note('补数在前、手工录价在后 —— 手工行会被权威源覆盖并升级来源');
+  s += sec('除权建议（两类成分必须分开说）');
+  s += '<div class="w" style="height:52px;flex-direction:column;align-items:flex-start;padding:6px 9px;gap:3px">' +
+    '<span class="lb on">sh600519 贵州茅台 · 除权日 2026-06-26</span>' +
+    '<span class="lb mut">送转 → 需确认后落新版本；现金分红 → 只提示不写库（红利税）</span>' +
+    '<span class="lb mut">采纳只解决送转那一半</span></div>';
+  s += sec('持仓（任意日期由版本序列推导，无快照）');
+  s += '<table class="t"><tr><th>代码</th><th>数量</th><th class="num">成本价</th><th class="num">最新价</th><th class="num">市值</th><th class="num">累计浮盈</th></tr>' +
+    '<tr><td>sh600519</td><td>200</td><td class="num">1,480.00</td><td class="num">1,612.00</td><td class="num">322,400</td><td class="num">+26,400</td></tr>' +
+    '<tr><td>sz000001</td><td>1,000</td><td class="num">11.20</td><td class="num">10.86</td><td class="num">10,860</td><td class="num">−340</td></tr>' +
+    '</table>';
+  s += note('累计浮动盈亏不免疫除权、不含分红；成本价手填单值');
+  s += sec('未交易金额（成员级单值，不进任何收益率分母）');
+  s += wf(36, '胡先森 ¥ 42,000.00');
+  s += sec('登记与录入');
+  if (ST.online) {
+    s += '<div class="grid2">' + wf(34, '登记持仓变动') + wf(34, '手工录收盘价') + '</div>';
+    s += note('持仓不可指向未来；修正历史用「清仓 = 0 股版本」截断未来，不改写过去');
+  } else {
+    s += disabled(wf(34, '登记持仓变动'), '会造出重复的持仓版本，且撤销流程需要在线状态');
+    s += disabled(wf(34, '手工录收盘价'), '手工行会被权威源覆盖并升级来源，必须在线比对');
+  }
+  s += '</div>';
+  return s;
+};
+
+/* ---- 收益趋势 ---- */
+SCR.trend = function () {
+  var s = '<div class="pad">';
+  s += sec('收益曲线（刻度 = 交易日，不是日历日）');
+  s += chart(140, '折线 · 每日浮动盈亏累计 · 横轴取 quote_daily 的日期集合');
+  s += note('系统不建交易日历：交易日序列由行情源返回的日期序列给出');
+  s += sec('收益率（两口径并列，各配分母）');
+  s += '<table class="t"><tr><th>口径</th><th>分母</th><th class="num">数值</th></tr>' +
+    '<tr><td>区间收益率</td><td>期初持仓市值</td><td class="num">+8.42%</td></tr>' +
+    '<tr><td>累计收益率</td><td>持仓成本合计</td><td class="num">+21.35%</td></tr>' +
+    '</table>';
+  s += note('多成员：金额相加、收益率按分母加权（实测简单平均 0.00% vs 加权 8.18%）');
+  s += sec('已知不准（如实标注，不剔除）');
+  s += note('持仓变动日当日盈亏存在不可消除误差，上界 = |Δ数量| × |当日每股涨跌额|', 'warn');
+  s += note('区间收益 = 期末市值 − 期初市值（端点法权威）；期初日自己的当日盈亏属上一区间');
+  s += '</div>';
+  return s;
+};
+
+/* ---- 除权确认 ---- */
+SCR.ca = function () {
+  var s = '<div class="pad">';
+  s += '<div class="banner">离线不可用：确认会改变持仓版本，且需在线状态' +
+    '　<span class="x" data-go="stock">返回</span></div>';
+  s += sec('待确认（按 成员 × 代码 × 除权日 记，重复检测天然幂等）');
+  s += '<div class="col" style="gap:8px">' +
+    '<div class="w" style="height:74px;flex-direction:column;align-items:flex-start;padding:7px 9px;gap:4px">' +
+    '<span class="lb on">胡先森 · sh600519 · 2026-06-26</span>' +
+    '<span class="lb">送转：10 送 2 转 3（万分比 5000）　现金分红：¥28.02423/股（微元）</span>' +
+    '<span>' + badge('送转可采纳', 'b-ok') + ' ' + badge('分红仅提示', 'b-mut') + '</span></div>' +
+    '<div class="w" style="height:74px;flex-direction:column;align-items:flex-start;padding:7px 9px;gap:4px">' +
+    '<span class="lb on">家人 · sz000001 · 2026-07-08</span>' +
+    '<span class="lb">送转：无　现金分红：¥0.35/股</span>' +
+    '<span>' + badge('仅提示', 'b-mut') + '</span></div>' +
+    '</div>';
+  s += sec('操作');
+  s += '<div class="grid2">' + wf(34, '采纳（落新版本，生效日 = 除权日）') + wf(34, '忽略') + '</div>';
+  s += note('采纳只解决送转那一半 —— 现金分红不调成本价、不写库');
+  s += note('采纳后可撤销；撤销是三步操作，由触发器塌缩成一步');
+  s += note('不做提前告知：成员在除权日之前没有任何可执行的动作');
+  s += '</div>';
+  return s;
+};
+
+/* ---- 标签管理 ---- */
+SCR.tags = function () {
+  var s = '<div class="pad">';
+  s += sec('类别树（两级：组可被打标签）');
+  s += '<div class="col" style="gap:5px">' +
+    '<div class="w" style="height:34px;justify-content:space-between;padding:0 9px"><span class="lb on">餐饮</span><span class="lb mut">叶子 · 8 笔</span></div>' +
+    '<div class="w" style="height:34px;justify-content:space-between;padding:0 9px"><span class="lb on">住房</span><span class="lb mut">组 · 含 水电 / 物业 / 房租</span></div>' +
+    '<div class="w" style="height:34px;justify-content:space-between;padding:0 9px"><span class="lb on">出行</span><span class="lb mut">叶子 · 12 笔</span></div>' +
+    '<div class="w" style="height:34px;justify-content:space-between;padding:0 9px"><span class="lb on">医疗</span><span class="lb mut">叶子 · 3 笔</span></div>' +
+    '<div class="w" style="height:34px;justify-content:space-between;padding:0 9px"><span class="lb on">其他</span><span class="lb mut">叶子 · 5 笔</span></div>' +
+    '</div>';
+  s += note('以上 5 个为默认集，完全不可变（不可改不可删）');
+  s += sec('对象标签（横切）');
+  s += '<div class="row" style="flex-wrap:wrap;gap:6px">' + tag('我') + tag('孩子') + tag('老人') + tag('宠物') + tag('＋ 新增') + '</div>';
+  s += sec('操作');
+  s += '<div class="grid2">' + wf(34, '新建标签') + wf(34, '改名（只改当前基线）') + '</div>' +
+    '<div class="grid2" style="margin-top:8px">' + wf(34, '合并 → 已并入映射') + wf(34, '归档') + '</div>';
+  s += note('合并用「已并入」映射，永不改写历史归属；被引用的标签删除会被 RESTRICT 拒绝');
+  s += note('标签归档 ⇒ 预算停用；零引用删除 ⇒ 级联删除全部预算版本');
+  s += sec('模板包');
+  s += wf(34, '导入场景化标签包（导入后为可删的自建标签）');
+  s += '</div>';
+  return s;
+};
+
+/* ---- 待同步队列 ---- */
+SCR.queue = function () {
+  var s = '<div class="pad">';
+  s += sec('待同步队列（' + ST.queue + ' / 100）');
+  if (ST.queue === 0) { s += note('队列为空'); }
+  var items = [
+    ['餐饮 · 孩子', '¥ 128.00', '2026-09-16 14:05', 'pend', ''],
+    ['出行 · 我', '¥ 24.50', '2026-09-16 13:40', 'fail', '类别已被归档，请重新选择'],
+    ['其他 · —', '¥ 15.00', '2026-09-08 20:11', 'old', '超过 7 天未同步']
+  ];
+  s += '<div class="col" style="gap:7px">';
+  for (var i = 0; i < Math.min(ST.queue, items.length); i++) {
+    var it = items[i];
+    var bd = it[3] === 'pend' ? badge('待同步', 'b-pend')
+      : it[3] === 'fail' ? badge('同步失败', 'b-fail') : badge('长期未同步', 'b-old');
+    s += '<div class="w" style="height:64px;flex-direction:column;align-items:flex-start;padding:7px 9px;gap:3px">' +
+      '<div class="row" style="justify-content:space-between;width:100%"><span class="lb on">' + it[0] + '</span>' + bd + '</div>' +
+      '<span class="lb">' + it[1] + ' · ' + it[2] + '</span>' +
+      (it[4] ? '<span class="why">' + it[4] + '</span>' : '') +
+      '</div>';
+  }
+  s += '</div>';
+  s += sec('协议（#10 冻结）');
+  s += note('触发：App 启动 / online 事件 / 回到前台；30 秒节流');
+  s += note('整批一个请求，服务端逐条独立判定；一条坏数据不阻塞其余（预校验后才进事务）');
+  s += note('不设过期 —— 这是用户的账，系统无权替他决定丢弃');
+  s += note('队列属于设备，不属于会话：登出、会话过期都不清空');
+  s += '</div>';
+  return s;
+};
+
+/* ---- 设置 ---- */
+SCR.me = function () {
+  var s = '<div class="pad">';
+  s += sec('我是谁（GET /api/session）');
+  s += wf(38, '胡先森　·　用于「谁花的」默认值');
+  s += sec('安装');
+  s += wf(34, '把这个站添加到主屏幕（图文引导）');
+  s += note('iOS 无 beforeinstallprompt，只能自绘；本期不做 Android / 桌面引导');
+  s += note('🔴 manifest.display 必须为 standalone —— 这是 ITP 7 天豁免的前提条件', 'bad');
+  s += sec('标签与模板');
+  s += '<div class="grid2">' + wf(34, '标签管理') + wf(34, '模板包') + '</div>';
+  s += sec('会话');
+  s += wf(34, '登出' + (ST.queue > 0 ? '（提示 ' + ST.queue + ' 条待同步）' : ''));
+  if (ST.queue > 0) s += note('登出前必须提示：待同步记录会保留至下次登录（队列存放在设备侧）');
+  s += '<div style="margin-top:8px">' + wf(34, '登出所有设备') + '</div>';
+  s += note('改密码会自动触发同一效果，由 DB 触发器强制，不由前端保证');
+  s += sec('运行状态');
+  s += '<table class="t"><tr><th>task</th><th>上次成功</th><th>状态</th></tr>' +
+    '<tr><td>quote</td><td>07:30</td><td>' + badge('ok', 'b-ok') + '</td></tr>' +
+    '<tr><td>corporate_action</td><td>07:30</td><td>' + badge('skipped', 'b-mut') + '</td></tr>' +
+    '<tr><td>report_weekly</td><td>周一 08:00</td><td>' + badge('ok', 'b-ok') + '</td></tr>' +
+    '</table>';
+  s += sec('关于');
+  s += note('无注册页 · 无访客链接 · 无权限差异（所有登录成员可见全部数据）');
+  s += '</div>';
+  return s;
+};
+
+/* ---- 变体 B 专用：资产页（内含 支出 / 股票 分段） ---- */
+SCR.assets = function () {
+  var seg = ST.seg.bseg || '支出';
+  var s = '<div class="pad">';
+  s += '<div class="seg">' +
+    '<button class="' + (seg === '支出' ? 'on' : '') + '" data-bseg="支出">支出</button>' +
+    '<button class="' + (seg === '股票' ? 'on' : '') + '" data-bseg="股票">股票</button>' +
+    '</div>';
+  if (seg === '支出') {
+    s += '<div class="col" style="gap:8px">' +
+      wf(52, '预算') + wf(52, '支出分析') + wf(52, '标签管理') + '</div>';
+    s += note('两个子系统在这一版里被收进同一个 Tab，靠分段控件切换');
+  } else {
+    s += '<div class="col" style="gap:8px">' +
+      wf(52, '股票持仓') + wf(52, '收益趋势') + wf(52, '除权确认') + '</div>';
+    s += note('分段控件的代价：从「支出」切到「股票」要 1 次点击，且分段状态需被记忆');
+  }
+  s += '</div>';
+  return s;
+};
+
+/* ══════════════════════════════════════════════════════════════════════════
+   3. 四个变体的导航壳（结构性差异，不是配色差异）
+   ══════════════════════════════════════════════════════════════════════════ */
+var VARIANTS = [
+  { k: 'A', name: '五 Tab 平铺', desc: '两子系统平级各占一个 Tab；记账为中央凸起' },
+  { k: 'B', name: '四 Tab + 分段', desc: '「资产」一个 Tab 收纳两子系统，内部用分段控件切' },
+  { k: 'C', name: '三 Tab 首页聚合', desc: '只有 3 个 Tab；其余页面都是首页的下级' },
+  { k: 'D', name: '抽屉菜单', desc: '无底部栏；顶部汉堡，所有页面在抽屉里平铺' }
+];
+
+var TABS = {
+  A: [['home', '首页'], ['ledger', '流水'], ['entry', '记一笔'], ['stock', '股票'], ['me', '我的']],
+  B: [['home', '首页'], ['ledger', '流水'], ['entry', '记一笔'], ['assets', '资产']],
+  C: [['home', '首页'], ['entry', '记一笔'], ['me', '我的']],
+  D: []
+};
+
+var DRAWER = [
+  ['home', '首页', 0], ['entry', '记一笔', 0], ['ledger', '流水', 0],
+  ['expense', '支出分析', 0], ['budget', '预算', 0],
+  ['stock', '股票持仓', 0], ['trend', '收益趋势', 0], ['ca', '除权确认', 0],
+  ['tags', '标签管理', 0], ['queue', '待同步', 0], ['me', '我的', 0]
+];
+
+/* 页面标题（顶部栏 / Tab 高亮用） */
+var TITLE = {
+  login: '登录', home: '首页', ledger: '流水', entry: '记一笔', expense: '支出分析',
+  budget: '预算', stock: '股票持仓', trend: '收益趋势', ca: '除权确认',
+  tags: '标签管理', queue: '待同步', me: '我的', assets: '资产'
+};
+
+/* 哪些页面在底部 Tab 里（决定是否显示返回键） */
+function isTab(v, p) {
+  var t = TABS[v] || [];
+  for (var i = 0; i < t.length; i++) if (t[i][0] === p) return true;
+  return false;
+}
+
+/* 全局横幅与待同步指示器注入到每个页面的内容顶部 —— 它们本就是「任一页面可见」 */
+function withGlobals(innerHtml, page) {
+  if (page === 'login') return innerHtml;
+  var i = innerHtml.indexOf('>');
+  if (i < 0) return innerHtml;
+  return innerHtml.slice(0, i + 1) + banners() + pendIndicator() + innerHtml.slice(i + 1);
+}
+
+function renderShell(v) {
+  var p = ST.page;
+  var inner = withGlobals((SCR[p] || SCR.home)(v), p);
+  var pc = ST.desktop ? ' pc' : '';
+  var html = '<div class="screen' + (ST.desktop ? ' dk' : '') + '">';
+
+  if (v === 'D') {
+    html += '<div class="topnav"><div class="hamb" data-drawer="1">☰</div>' +
+      '<div class="ttl">' + TITLE[p] + '</div>' +
+      '<div style="flex:1"></div>' + (ST.queue > 0 ? badge('待同步 ' + ST.queue, 'b-pend') : '') + '</div>';
+    html += '<div style="height:46px"></div>';
+    if (ST.drawer) html += renderDrawer();
+  } else {
+    /* 非 Tab 页给一个返回键 —— 四个变体都需要，避免把「回不去」当成设计差异 */
+    if (!isTab(v, p)) {
+      html += '<div class="topnav"><button class="backbtn" data-go="' + ('home') + '">‹ 返回</button>' +
+        '<div class="ttl">' + TITLE[p] + '</div><div style="flex:1"></div>' +
+        (ST.queue > 0 ? badge('待同步 ' + ST.queue, 'b-pend') : '') + '</div>';
+      html += '<div style="height:46px"></div>';
+    }
+  }
+
+  /* 桌面视口：左栏导航 + 多列内容（本票只给一种对照形态） */
+  if (ST.desktop) {
+    html += '<div style="display:flex;align-items:flex-start">' +
+      '<div style="width:172px;border-right:1px solid #e4e8ed;padding:10px;min-height:640px;background:#fbfcfd">' +
+      '<div class="lb on" style="margin-bottom:8px">家庭财务</div>';
+    for (var d = 0; d < DRAWER.length; d++) {
+      var it = DRAWER[d];
+      html += '<div class="ditem" data-go="' + it[0] + '" style="' +
+        (p === it[0] ? 'background:#dbe4f4;border-color:#9db4dd' : '') + '">' + it[1] + '</div>';
+    }
+    html += '</div><div style="flex:1">' + inner.replace('class="pad', 'class="pad' + pc) + '</div></div>';
+  } else {
+    html += inner;
+  }
+
+  if (v !== 'D') html += renderTabbar(v);
+  html += '</div>';
+  return html;
+}
+
+function renderTabbar(v) {
+  var t = TABS[v] || [];
+  if (!t.length) return '';
+  var s = '<div class="tabbar">';
+  for (var i = 0; i < t.length; i++) {
+    var k = t[i][0], lab = t[i][1];
+    var on = ST.page === k ? ' on' : '';
+    var raise = (k === 'entry') ? ' raise' : '';
+    s += '<button class="tb' + on + raise + '" data-go="' + k + '">' +
+      '<span class="dot"></span><span>' + lab + '</span></button>';
+  }
+  return s + '</div>';
+}
+
+function renderDrawer() {
+  var s = '<div class="drawer"><h4>全部页面</h4>';
+  for (var i = 0; i < DRAWER.length; i++) {
+    var it = DRAWER[i];
+    s += '<div class="ditem' + (it[2] ? ' d2' : '') + '" data-go="' + it[0] + '" style="' +
+      (ST.page === it[0] ? 'background:#dbe4f4;border-color:#9db4dd' : '') + '">' +
+      '<span>' + it[1] + '</span>' +
+      (it[0] === 'queue' && ST.queue > 0 ? badge(String(ST.queue), 'b-pend') : '') +
+      '</div>';
+  }
+  return s + '<div class="ditem" data-drawer="1" style="margin-top:8px">收起</div></div>';
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   4. 步数度量 —— 由导航图经 BFS 算出，可被任何人复跑
+      口径：一次「点击」计 1 步（不含键盘输入）；「保存」本身计 1 步。
+   ══════════════════════════════════════════════════════════════════════════ */
+var NAV = {
+  /* 每个变体：tab 集合 + 有向边（含返回与全局指示器）*/
+  A: {
+    tabs: ['home', 'ledger', 'entry', 'stock', 'me'],
+    edges: [
+      ['home', 'expense'], ['home', 'budget'], ['home', 'queue'],
+      ['stock', 'trend'], ['stock', 'ca'], ['stock', 'queue'],
+      ['me', 'tags'], ['me', 'queue'],
+      ['ledger', 'queue'], ['entry', 'queue'], ['expense', 'queue'],
+      ['budget', 'queue'], ['trend', 'queue'], ['ca', 'queue'], ['tags', 'queue']
+    ]
+  },
+  B: {
+    tabs: ['home', 'ledger', 'entry', 'assets'],
+    edges: [
+      ['assets', 'budget'], ['assets', 'expense'], ['assets', 'tags'],
+      ['assets', 'stock'], ['assets', 'trend'], ['assets', 'ca'],
+      ['home', 'queue'], ['ledger', 'queue'], ['entry', 'queue'],
+      ['assets', 'queue'], ['budget', 'queue'], ['expense', 'queue'],
+      ['tags', 'queue'], ['stock', 'queue'], ['trend', 'queue'], ['ca', 'queue']
+    ]
+  },
+  C: {
+    tabs: ['home', 'entry', 'me'],
+    edges: [
+      ['home', 'ledger'], ['home', 'expense'], ['home', 'budget'],
+      ['home', 'stock'], ['home', 'trend'], ['home', 'tags'],
+      ['home', 'ca'], ['home', 'queue'],
+      ['me', 'queue'], ['entry', 'queue'], ['ledger', 'queue'],
+      ['expense', 'queue'], ['budget', 'queue'], ['stock', 'queue'],
+      ['trend', 'queue'], ['tags', 'queue'], ['ca', 'queue']
+    ]
+  },
+  D: {
+    tabs: [],
+    /* 抽屉变体没有底部栏 ⇒ 任何页面到任何页面都要「先开抽屉、再点条目」= 2 步。
+       用中间节点 drawer 显式表达，避免把这个成本悄悄漏掉。 */
+    edges: (function () {
+      var ps = ['home', 'ledger', 'entry', 'expense', 'budget', 'stock',
+        'trend', 'ca', 'tags', 'queue', 'me'];
+      var e = [];
+      for (var i = 0; i < ps.length; i++) {
+        e.push([ps[i], 'drawer']);   /* 打开抽屉 = 1 步 */
+        e.push(['drawer', ps[i]]);   /* 选中条目 = 1 步 */
+      }
+      return e;
+    })()
+  }
+};
+
+var ALL_PAGES = ['home', 'ledger', 'entry', 'expense', 'budget', 'stock', 'trend', 'ca', 'tags', 'queue', 'me'];
+
+/* 由变体定义构建邻接表：Tab 之间两两可达（1 步）；非 Tab 页可 1 步回首页 */
+function buildAdj(v) {
+  var n = NAV[v], adj = {};
+  function add(a, b) { (adj[a] = adj[a] || []).push([b, 1]); }
+  for (var i = 0; i < n.tabs.length; i++) {
+    for (var j = 0; j < n.tabs.length; j++) if (i !== j) add(n.tabs[i], n.tabs[j]);
+  }
+  for (var e = 0; e < n.edges.length; e++) add(n.edges[e][0], n.edges[e][1]);
+  /* 非 Tab 页有返回键 ⇒ 1 步回首页；抽屉变体已在上面的 edges 里显式给出 */
+  if (v !== 'D') {
+    for (var p = 0; p < ALL_PAGES.length; p++) {
+      var pg = ALL_PAGES[p];
+      var isT = n.tabs.indexOf(pg) >= 0;
+      if (!isT) add(pg, 'home');
+    }
+  }
+  return adj;
+}
+
+/* BFS：从 from 到 to 的最少步数；不可达返回 null */
+function bfs(adj, from, to) {
+  if (from === to) return 0;
+  var seen = {}, q = [[from, 0]];
+  seen[from] = 1;
+  while (q.length) {
+    var cur = q.shift(), node = cur[0], d = cur[1];
+    var nxt = adj[node] || [];
+    for (var i = 0; i < nxt.length; i++) {
+      var nb = nxt[i][0];
+      if (seen[nb]) continue;
+      if (nb === to) return d + 1;
+      seen[nb] = 1;
+      q.push([nb, d + 1]);
+    }
+  }
+  return null;
+}
+
+/* 三条高频路径的度量 */
+function measure(v) {
+  var adj = buildAdj(v);
+  var SAVE = 1; /* 表单打开后再点「保存」= 1 步 */
+  var r1 = bfs(adj, 'home', 'entry');
+  var r2 = bfs(adj, 'entry', 'ledger');
+  var r3 = bfs(adj, 'home', 'stock');
+  var worst = 0, worstFrom = '';
+  for (var i = 0; i < ALL_PAGES.length; i++) {
+    var d = bfs(adj, ALL_PAGES[i], 'entry');
+    if (d !== null && d > worst) { worst = d; worstFrom = ALL_PAGES[i]; }
+  }
+  return {
+    v: v,
+    r1: r1 === null ? null : r1 + SAVE,
+    r2: r2,
+    r3: r3,
+    worst: worst + SAVE,
+    worstFrom: worstFrom
+  };
+}
+
+function renderPanel() {
+  var html = '<h3>步数度量（本原型内 BFS 计算）' +
+    '<span class="hint" style="float:right;cursor:pointer" id="panel-x">收起 ✕</span></h3>';
+  html += '<table><tr><th>变体</th><th>①首页→记账→保存</th><th>②记完→看流水</th><th>③首页→股票</th><th>最坏→记账</th></tr>';
+  var best1 = 99, best2 = 99, best3 = 99, bestW = 99;
+  var ms = [];
+  for (var i = 0; i < VARIANTS.length; i++) {
+    var m = measure(VARIANTS[i].k);
+    ms.push(m);
+    if (m.r1 < best1) best1 = m.r1;
+    if (m.r2 < best2) best2 = m.r2;
+    if (m.r3 < best3) best3 = m.r3;
+    if (m.worst < bestW) bestW = m.worst;
+  }
+  for (var k = 0; k < ms.length; k++) {
+    var m2 = ms[k];
+    html += '<tr><td>' + m2.v + '</td>' +
+      '<td class="v ' + (m2.r1 === best1 ? 'best' : '') + '">' + m2.r1 + ' 步</td>' +
+      '<td class="v ' + (m2.r2 === best2 ? 'best' : '') + '">' + m2.r2 + ' 步</td>' +
+      '<td class="v ' + (m2.r3 === best3 ? 'best' : '') + '">' + m2.r3 + ' 步</td>' +
+      '<td class="v ' + (m2.worst === bestW ? 'best' : 'worst') + '">' + m2.worst + ' 步</td></tr>';
+  }
+  html += '</table>';
+  html += '<p>口径：一次点击 = 1 步（不含键盘输入）；「保存」本身计 1 步。' +
+    '第 ③ 列表述的是「首页 → 看到股票持仓」。最坏列 = 从最深层页面出发到保存。' +
+    '数字由本文件内的导航图 BFS 算出，可复跑；<b>不是用户研究数据</b>。</p>';
+  html += '<p class="hint">变体定义：';
+  for (var q = 0; q < VARIANTS.length; q++) {
+    html += VARIANTS[q].k + ' = ' + VARIANTS[q].name + '（' + VARIANTS[q].desc + '）　';
+  }
+  html += '</p>';
+  html += '<div class="tracebox">你实际的点击：' + ST.taps + ' 步<br>' +
+    (ST.trace.length ? ST.trace.join(' → ') : '（还没点）') +
+    '<br><span class="hint" id="trace-x" style="cursor:pointer">重置计数</span></div>';
+  return html;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   5. 渲染 / 事件
+   ══════════════════════════════════════════════════════════════════════════ */
+var device = document.getElementById('device');
+var mpanel = document.getElementById('mpanel');
+var vl = document.getElementById('vl');
+
+function render() {
+  device.className = 'device' + (ST.desktop ? ' desktop' : '');
+  device.innerHTML = renderShell(ST.variant);
+  mpanel.style.display = ST.panel ? 'block' : 'none';
+  if (ST.panel) mpanel.innerHTML = renderPanel();
+  var vv = null;
+  for (var i = 0; i < VARIANTS.length; i++) if (VARIANTS[i].k === ST.variant) vv = VARIANTS[i];
+  vl.innerHTML = '<b>' + vv.k + '</b> ' + vv.name + (ST.desktop ? ' · 桌面' : ' · 手机');
+  document.getElementById('tg-net').className = 'tg' + (ST.online ? ' on' : '');
+  document.getElementById('tg-net').textContent = ST.online ? '在线' : '离线';
+  document.getElementById('tg-q').className = 'tg' + (ST.queue > 0 ? ' on' : '');
+  document.getElementById('tg-q').textContent = ST.queue + ' 条';
+  document.getElementById('tg-sw').className = 'tg' + (ST.swUpdate ? ' on' : '');
+  document.getElementById('tg-sw').textContent = ST.swUpdate ? '有' : '无';
+  document.getElementById('tg-vp').className = 'tg' + (ST.desktop ? ' on' : '');
+  document.getElementById('tg-vp').textContent = ST.desktop ? '桌面' : '手机';
+  document.getElementById('tg-m').className = 'tg' + (ST.panel ? ' on' : '');
+}
+
+/* 记录一次用户点击（自由玩耍用，与上方 BFS 度量是两回事） */
+function tap(label) {
+  ST.taps++;
+  ST.trace.push(label);
+  if (ST.trace.length > 14) ST.trace.shift();
+}
+
+function go(p) {
+  tap(TITLE[p] || p);
+  ST.page = p;
+  ST.drawer = false;
+  render();
+}
+
+/* URL 同步：变体可分享、刷新后稳定。file:// 下 replaceState 可能抛错，回退到 hash */
+function setVariant(k) {
+  ST.variant = k;
+  ST.page = (k === 'C') ? 'home' : 'home';
+  ST.seg = {};
+  ST.drawer = false;
+  ST.taps = 0;
+  ST.trace = [];
+  ST.saved = null;
+  try { history.replaceState(null, '', '?variant=' + k); }
+  catch (e) { try { location.hash = 'variant=' + k; } catch (e2) {} }
+  render();
+}
+function readVariant() {
+  var s = (location.search || '').replace(/^\?/, '');
+  var m = /(?:^|&)variant=([A-D])/.exec(s);
+  if (m) return m[1];
+  var h = /variant=([A-D])/.exec(location.hash || '');
+  if (h) return h[1];
+  return 'A';
+}
+
+device.addEventListener('click', function (ev) {
+  var t = ev.target;
+  while (t && t !== device) {
+    if (t.dataset) {
+      if (t.dataset.go) { go(t.dataset.go); return; }
+      if (t.dataset.drawer) { ST.drawer = !ST.drawer; tap(ST.drawer ? '打开抽屉' : '收起抽屉'); render(); return; }
+      if (t.dataset.guide) { ST.guided = true; tap('关闭安装引导'); render(); return; }
+      if (t.dataset.axis) { ST.seg.axis = t.dataset.axis; render(); return; }
+      if (t.dataset.bseg) { ST.seg.bseg = t.dataset.bseg; render(); return; }
+      if (t.dataset.act === 'clearsave') { ST.saved = null; ST.taps = 0; ST.trace = []; render(); return; }
+      if (t.dataset.act === 'save') {
+        tap('保存');
+        ST.saved = { n: ST.taps, v: ST.variant };
+        render();
+        return;
+      }
+    }
+    t = t.parentNode;
+  }
+});
+
+mpanel.addEventListener('click', function (ev) {
+  if (ev.target.id === 'panel-x') { ST.panel = false; render(); }
+  if (ev.target.id === 'trace-x') { ST.taps = 0; ST.trace = []; render(); }
+});
+
+document.getElementById('tg-net').onclick = function () { ST.online = !ST.online; render(); };
+document.getElementById('tg-q').onclick = function () { ST.queue = (ST.queue + 1) % 4; render(); };
+document.getElementById('tg-sw').onclick = function () { ST.swUpdate = !ST.swUpdate; render(); };
+document.getElementById('tg-vp').onclick = function () { ST.desktop = !ST.desktop; render(); };
+document.getElementById('tg-m').onclick = function () { ST.panel = !ST.panel; render(); };
+
+function cycle(dir) {
+  var idx = 0;
+  for (var i = 0; i < VARIANTS.length; i++) if (VARIANTS[i].k === ST.variant) idx = i;
+  var n = (idx + dir + VARIANTS.length) % VARIANTS.length;
+  setVariant(VARIANTS[n].k);
+}
+document.getElementById('prev').onclick = function () { cycle(-1); };
+document.getElementById('next').onclick = function () { cycle(1); };
+
+document.addEventListener('keydown', function (ev) {
+  var a = document.activeElement;
+  if (a && /^(input|textarea)$/i.test(a.tagName)) return;
+  if (a && a.isContentEditable) return;
+  if (ev.key === 'ArrowLeft') { cycle(-1); }
+  if (ev.key === 'ArrowRight') { cycle(1); }
+});
+
+/* 度量面板首次渲染时把四组数字打到控制台，方便复跑对照 */
+setVariant(readVariant());
+(function () {
+  var lines = ['[原型度量] 口径：一次点击 = 1 步（不含键盘输入），「保存」计 1 步'];
+  for (var i = 0; i < VARIANTS.length; i++) {
+    var m = measure(VARIANTS[i].k);
+    lines.push('  ' + m.v + ' ' + VARIANTS[i].name +
+      '：首页→记账→保存 ' + m.r1 + ' 步 | 记完→流水 ' + m.r2 + ' 步 | 首页→股票 ' + m.r3 +
+      ' 步 | 最坏(从 ' + m.worstFrom + ')→保存 ' + m.worst + ' 步');
+  }
+  if (window.console && console.log) console.log(lines.join('\n'));
+})();
+</script>
+</body>
+</html>
