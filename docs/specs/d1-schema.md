@@ -325,7 +325,9 @@ PRAGMA defer_foreign_keys = ON;   -- 迁移文件顶部；延迟到事务结束�
 
 - **v1 阶段**（全新开始、无生产数据）：破坏性迁移可接受。
 - **上线之后**：schema 变更一律**只加不删**；确需删除时先导出 + 保留一个冻结周期的
-  双写窗口。这条与 #15 «备份与导出策略» 直接相交，已在 §11 交给它。
+  双写窗口。这条与 #15 «备份与导出策略» 直接相交 —— **已由 #15 落定**：采用
+  D1 Time Travel（Free 回溯 7 天）+ 手动导出 + 「迁移前先导出」runbook 的三层备份，
+  **不做自动备份、不新增 cron**（见 `docs/specs/backup-export-contract.md` §3）。
 
 ---
 
@@ -376,7 +378,11 @@ PRAGMA defer_foreign_keys = ON;   -- 迁移文件顶部；延迟到事务结束�
 
 ## 11. 给下游票的派生要求
 
-**→ «备份与导出策略»（#15，当前阻塞于本票）**
+**→ «备份与导出策略»（#15 —— 已收口）**
+
+> ⚠️ **本节 5 条派生要求已由 #15 全部落定**，结论见 `docs/specs/backup-export-contract.md`
+> （第六份实现契约）。其中第 5 条的答复是**「不需要加列、不需要加表」**（该契约 §9）。
+> 本节保留原文供追溯，**不再代表未决事项**。
 
 1. **备份必须是「表级完整」而非「数据子集」**：本 schema 里
    `quote_daily`、`corporate_action`、`position_version`、`budget`、`budget_alert_state`、
@@ -390,6 +396,8 @@ PRAGMA defer_foreign_keys = ON;   -- 迁移文件顶部；延迟到事务结束�
    回导时的 `PRAGMA defer_foreign_keys = ON` 是必需品而非可选项（§4.2）。
 5. 本票未给 schema 版本号列。**若 #15 需要「备份里标注 schema 版本」，请回本票复议**
    —— 那会给所有表加一列或引入一张 `schema_meta` 表，属结构变更。
+   ✅ **已由 #15 答复：不需要**（`backup-export-contract.md` §9）。schema 版本改用 D1 自带的
+   `d1_migrations` 表 + `migrations/` 目录表达 ⇒ **零 schema 变更，本票无须复议**。
 
 **→ «前端信息架构与页面清单»（#11）**
 

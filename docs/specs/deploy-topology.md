@@ -401,8 +401,8 @@ cd ../frontend && wrangler pages deploy dist --project-name=hujia-ledger
 |---|---|---|
 | 测试策略与 CI（wrangler 本地测试、D1 本地实例的具体形态） | **仍留雾区** | 后续票 / 实现期 |
 | 本地开发环境的 D1 数据种子与假数据 | **仍留雾区** | 后续票 / 实现期 |
-| 导出格式规范（CSV / JSON schema） | **仍留雾区** | **#15** |
-| 数据归档与冷备 | **仍留雾区** | **#15** |
+| 导出格式规范（CSV / JSON schema） | **已由 #15 落定** | `docs/specs/backup-export-contract.md` §6 |
+| 数据归档与冷备 | **已由 #15 落定**（三层备份：D1 Time Travel + 手动导出 + 「迁移前先导出」runbook） | `docs/specs/backup-export-contract.md` §3 |
 | HTTP API 侧的可观测性与 Error 1102 监控 | **仍留雾区** | 后续票 / 实现期 |
 | 第三方推送渠道的具体选型 | **仍留雾区** | 后续票 |
 | 图表库选型与可视化交互细节 | **仍留雾区** | 后续票 / 实现期 |

@@ -160,7 +160,8 @@
 ### 5.5 清理任务
 
 挂在**已有的**「预算提醒巡检」cron（每日 20:00 CST）流程里，**不新增 cron、不新增 task 值**
-（cron 配额只剩 1 个，留给 #15 备份）：
+（账户级 cron 配额仍余 1 个**空位** —— #15 已决议**不做自动备份、不新增 cron**，
+该空位未分配；但任何新增仍须先回 #6 重排）：
 
 ```sql
 DELETE FROM session       WHERE absolute_expires_at < :now;
@@ -191,7 +192,10 @@ ON CONFLICT (member_id) DO UPDATE SET
 - `.secrets/` 已加入 `.gitignore`。
 - **唯一信任根 = 你能访问 Cloudflare 账号**（D1 与 Workers 都是你的）⇒ 不再造第二条恢复通道，
   也就没有被攻击者利用的恢复入口。
-- ⚠️ 必然后果：**既忘了密码又丢了 Cloudflare 账号访问权时，数据救不回来**（备份是 #15 的事）。
+- ⚠️ 必然后果：**既忘了密码又丢了 Cloudflare 账号访问权时，数据救不回来**。备份方案已由 #15
+  落定为三层（见 `docs/specs/backup-export-contract.md`），但**第一层 D1 Time Travel 也在
+  Cloudflare 账号之内** ⇒ 这条必然后果**不因备份的存在而改变**（这是设计上的有意取舍：
+  不造第二条恢复通道，也就没有被攻击者利用的恢复入口）。
 - 忘记密码**不需要**任何在线流程：重跑上面的脚本即完成重置。
 
 ---
@@ -239,7 +243,11 @@ ON CONFLICT (member_id) DO UPDATE SET
    这是相对 JWT 的一处运维简化。
 9. 那个每日 cron 需要能对 D1 执行 §5.5 的两条 DELETE。
 
-### → «备份与导出策略»（#15）
+### → «备份与导出策略»（#15 —— 已收口）
+
+> ⚠️ **本节 3 条派生要求已由 #15 全部落定**（`docs/specs/backup-export-contract.md` §4）：
+> `member_credential` 已列入必备份清单并标 🔴；`session` 与 `login_attempt` 均已从
+> 13 张导出表中排除。本节保留原文供追溯，**不再代表未决事项**。
 
 10. **`member_credential` 必须纳入备份** —— 它是「不可由其他表重算」的一类：
     不备份，恢复后就**没人能登录**（因为不开放注册、也无法从密码反推 phc）。
