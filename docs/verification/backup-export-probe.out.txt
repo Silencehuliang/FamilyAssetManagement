@@ -1,0 +1,192 @@
+仓库根: E:\Development\Project\FamilyAssetManagement
+迁移文件: 0001_init.sql, 0002_auth.sql, 0003_offline.sql
+
+==============================================================================
+§1 备份清单的表级完整性（直接读仓库迁移文件）
+==============================================================================
+  SQLite runtime version = 3.53.1
+  库内表 (15): budget, budget_alert_state, corporate_action, cron_run, entry, entry_object, login_attempt, member, member_credential, member_idle_cash, position_version, quote_daily, report_delivery, session, tag
+  PASS  §1.1 表总数 = 15（12 + 3，与 #14 / #9 的计数一致）  |  15
+  PASS  §1.2 备份清单 15 − 2 = 13 表  |  13
+  备份清单 (13): budget, budget_alert_state, corporate_action, cron_run, entry, entry_object, member, member_credential, member_idle_cash, position_version, quote_daily, report_delivery, tag
+  PASS  §1.3 13 表逐张命中（无漏、无多）  |  missing=[] extra=[]
+  PASS    §1.4 备份清单含 budget
+  PASS    §1.4 备份清单含 budget_alert_state
+  PASS    §1.4 备份清单含 corporate_action
+  PASS    §1.4 备份清单含 cron_run
+  PASS    §1.4 备份清单含 entry
+  PASS    §1.4 备份清单含 entry_object
+  PASS    §1.4 备份清单含 member
+  PASS    §1.4 备份清单含 member_credential
+  PASS    §1.4 备份清单含 member_idle_cash
+  PASS    §1.4 备份清单含 position_version
+  PASS    §1.4 备份清单含 quote_daily
+  PASS    §1.4 备份清单含 report_delivery
+  PASS    §1.4 备份清单含 tag
+  PASS    §1.5 备份清单排除 login_attempt
+  PASS    §1.5 备份清单排除 session
+  PASS  §1.6 quote_daily 存在且纳入（#13：历史昨收不可重建）
+  PASS  §1.7 corporate_action 存在且纳入（除权确认状态不可重算）
+  PASS  §1.8 member_credential 纳入（#9：不备份则恢复后没人能登录）
+
+  注：`d1_migrations` 是 D1 官方自带的迁移记录表（不在本仓库迁移文件里，
+      由 `wrangler d1 migrations apply` 创建）。本票用它表达 schema 版本。
+
+==============================================================================
+§2 整数列的取值域与 JSON 安全性（逐列断言上界 < 2^53−1）
+==============================================================================
+  2^53 − 1 = 9007199254740991（RFC 7493 的精确互操作边界）
+
+  范围：**仅备份清单内的 13 张表** —— session / login_attempt 不导出，其整数列无需归类。
+
+  PASS    budget.id                                  row_id         <= 2147483648        |  代理主键 / 外键引用 / sort_order：2 人家庭行数上界
+  PASS    budget.tag_id                              row_id         <= 2147483648        |  代理主键 / 外键引用 / sort_order：2 人家庭行数上界
+  PASS    budget.amount_cents                        money_cents    <= 1099511627776     |  金额分：2^40 分 = 1.0995×10^10 元
+  PASS    budget.threshold_ppm                       ratio_ppm      <= 1073741824        |  万分比：2^30 ppm = 107374.1824%
+  PASS    budget.created_at                          epoch_seconds  <= 8589934592        |  UTC 秒：2^33 ≈ 公元 2242 年，远超系统寿命
+  PASS    budget_alert_state.budget_id               row_id         <= 2147483648        |  代理主键 / 外键引用 / sort_order：2 人家庭行数上界
+  PASS    budget_alert_state.consumed_cents          money_cents    <= 1099511627776     |  金额分：2^40 分 = 1.0995×10^10 元
+  PASS    budget_alert_state.reminded_at             epoch_seconds  <= 8589934592        |  UTC 秒：2^33 ≈ 公元 2242 年，远超系统寿命
+  PASS    corporate_action.member_id                 row_id         <= 2147483648        |  代理主键 / 外键引用 / sort_order：2 人家庭行数上界
+  PASS    corporate_action.cash_per_share_micro      price_micro    <= 1099511627776     |  微元/股：2^40 微元 = 1.0995×10^6 元/股
+  PASS    corporate_action.bonus_ratio_ppm           ratio_ppm      <= 1073741824        |  万分比：2^30 ppm = 107374.1824%
+  PASS    corporate_action.decided_at                epoch_seconds  <= 8589934592        |  UTC 秒：2^33 ≈ 公元 2242 年，远超系统寿命
+  PASS    corporate_action.applied_version_id        row_id         <= 2147483648        |  代理主键 / 外键引用 / sort_order：2 人家庭行数上界
+  PASS    cron_run.id                                row_id         <= 2147483648        |  代理主键 / 外键引用 / sort_order：2 人家庭行数上界
+  PASS    cron_run.scheduled_at                      epoch_millis   <= 4398046511104     |  UTC 毫秒（cron_run.scheduled_at）：2^42 ≈ 公元 2109 年
+  PASS    cron_run.started_at                        epoch_seconds  <= 8589934592        |  UTC 秒：2^33 ≈ 公元 2242 年，远超系统寿命
+  PASS    cron_run.finished_at                       epoch_seconds  <= 8589934592        |  UTC 秒：2^33 ≈ 公元 2242 年，远超系统寿命
+  PASS    cron_run.duration_ms                       duration_ms    <= 1048576           |  单次运行耗时：cron 墙钟上限 15 min = 900000 ms
+  PASS    entry.id                                   row_id         <= 2147483648        |  代理主键 / 外键引用 / sort_order：2 人家庭行数上界
+  PASS    entry.member_id                            row_id         <= 2147483648        |  代理主键 / 外键引用 / sort_order：2 人家庭行数上界
+  PASS    entry.category_tag_id                      row_id         <= 2147483648        |  代理主键 / 外键引用 / sort_order：2 人家庭行数上界
+  PASS    entry.amount_cents                         money_cents    <= 1099511627776     |  金额分：2^40 分 = 1.0995×10^10 元
+  PASS    entry.occurred_at                          epoch_seconds  <= 8589934592        |  UTC 秒：2^33 ≈ 公元 2242 年，远超系统寿命
+  PASS    entry.created_at                           epoch_seconds  <= 8589934592        |  UTC 秒：2^33 ≈ 公元 2242 年，远超系统寿命
+  PASS    entry_object.entry_id                      row_id         <= 2147483648        |  代理主键 / 外键引用 / sort_order：2 人家庭行数上界
+  PASS    entry_object.tag_id                        row_id         <= 2147483648        |  代理主键 / 外键引用 / sort_order：2 人家庭行数上界
+  PASS    member.id                                  row_id         <= 2147483648        |  代理主键 / 外键引用 / sort_order：2 人家庭行数上界
+  PASS    member.sort_order                          row_id         <= 2147483648        |  代理主键 / 外键引用 / sort_order：2 人家庭行数上界
+  PASS    member.created_at                          epoch_seconds  <= 8589934592        |  UTC 秒：2^33 ≈ 公元 2242 年，远超系统寿命
+  PASS    member_credential.member_id                row_id         <= 2147483648        |  代理主键 / 外键引用 / sort_order：2 人家庭行数上界
+  PASS    member_credential.gen                      generation     <= 1073741824        |  凭据世代整数
+  PASS    member_credential.updated_at               epoch_seconds  <= 8589934592        |  UTC 秒：2^33 ≈ 公元 2242 年，远超系统寿命
+  PASS    member_idle_cash.member_id                 row_id         <= 2147483648        |  代理主键 / 外键引用 / sort_order：2 人家庭行数上界
+  PASS    member_idle_cash.amount_cents              money_cents    <= 1099511627776     |  金额分：2^40 分 = 1.0995×10^10 元
+  PASS    member_idle_cash.updated_at                epoch_seconds  <= 8589934592        |  UTC 秒：2^33 ≈ 公元 2242 年，远超系统寿命
+  PASS    position_version.id                        row_id         <= 2147483648        |  代理主键 / 外键引用 / sort_order：2 人家庭行数上界
+  PASS    position_version.member_id                 row_id         <= 2147483648        |  代理主键 / 外键引用 / sort_order：2 人家庭行数上界
+  PASS    position_version.qty                       qty            <= 1099511627776     |  股数：2^40 ≈ 1.1×10^12 股
+  PASS    position_version.cost_price_cents          money_cents    <= 1099511627776     |  金额分：2^40 分 = 1.0995×10^10 元
+  PASS    position_version.recorded_at               epoch_seconds  <= 8589934592        |  UTC 秒：2^33 ≈ 公元 2242 年，远超系统寿命
+  PASS    quote_daily.close_cents                    money_cents    <= 1099511627776     |  金额分：2^40 分 = 1.0995×10^10 元
+  PASS    quote_daily.prev_close_cents               money_cents    <= 1099511627776     |  金额分：2^40 分 = 1.0995×10^10 元
+  PASS    quote_daily.recorded_at                    epoch_seconds  <= 8589934592        |  UTC 秒：2^33 ≈ 公元 2242 年，远超系统寿命
+  PASS    report_delivery.id                         row_id         <= 2147483648        |  代理主键 / 外键引用 / sort_order：2 人家庭行数上界
+  PASS    report_delivery.data_cutoff_at             epoch_seconds  <= 8589934592        |  UTC 秒：2^33 ≈ 公元 2242 年，远超系统寿命
+  PASS    report_delivery.created_at                 epoch_seconds  <= 8589934592        |  UTC 秒：2^33 ≈ 公元 2242 年，远超系统寿命
+  PASS    tag.id                                     row_id         <= 2147483648        |  代理主键 / 外键引用 / sort_order：2 人家庭行数上界
+  PASS    tag.parent_id                              row_id         <= 2147483648        |  代理主键 / 外键引用 / sort_order：2 人家庭行数上界
+  PASS    tag.sort_order                             row_id         <= 2147483648        |  代理主键 / 外键引用 / sort_order：2 人家庭行数上界
+  PASS    tag.is_builtin                             tiny_flag      <= 1                 |  0/1 布尔标志
+  PASS    tag.archived_at                            epoch_seconds  <= 8589934592        |  UTC 秒：2^33 ≈ 公元 2242 年，远超系统寿命
+  PASS    tag.merged_into_id                         row_id         <= 2147483648        |  代理主键 / 外键引用 / sort_order：2 人家庭行数上界
+  PASS    tag.created_at                             epoch_seconds  <= 8589934592        |  UTC 秒：2^33 ≈ 公元 2242 年，远超系统寿命
+  PASS  §2.1 备份清单内全部 INTEGER 列均已归类（无未分类列）
+  PASS  §2.2 已归类列数 = 53  |  53
+  PASS  §2.3 被排除的 10 个整数列未混入分类表  |  excluded=['login_attempt.bucket_at', 'login_attempt.n', 'login_attempt.updated_at', 'session.id', 'session.member_id', 'session.created_at', 'session.last_seen_at', 'session.expires_at', 'session.absolute_expires_at', 'session.revoked_at'] leaked=[]
+  PASS  §2.4 全库整数上界的最大值 < 2^53−1  |  cron_run.scheduled_at 的上界 4398046511104，余量 2048.0 倍
+
+  说明：上界来自「语义类的物理极限」，不是数据实测值 —— 后者无法先验给出。
+        断言的是「该列**不可能**达到 2^53−1」，因此 JSON 数字字面量在本库恒精确。
+        ⚠️ 本节的往返验证由 §3 给出，但 **Python 不能作为该边界的证据** —— 见 §3。
+
+==============================================================================
+§3 JSON 数字往返：本库取值域内精确（并说明为何 Python 不能证明边界）
+==============================================================================
+  ⚠️ CPython 的 int 是任意精度、json 不走 IEEE754 ⇒ 本节**不构成** JS 侧的证据。
+     本节的用途有二：① 列出本库取值域；② **证明 Python 不适合测这个边界**。
+
+  PASS    往返精确: entry.amount_cents 上界                        1099511627776
+  PASS    往返精确: entry.occurred_at 上界                         8589934592
+  PASS    往返精确: cron_run.scheduled_at 上界                     4398046511104
+  PASS    往返精确: corporate_action.cash_per_share_micro 上界     1099511627776
+  PASS    往返精确: 茅台实测派息 28.02423 元 = 微元                       28024230
+  PASS    往返精确: unix 秒 2026-09-17                            1789000000
+  PASS  §3.1 Python 对 2^53+1 仍精确 —— 故 Python **无法**充当该边界的证据（预期行为）  |  9007199254740993 -> 9007199254740993
+
+  ⇒ 边界必须在 V8 上验：见 backup-export-cpu-probe.js §C。
+     该探针在 Node(V8) 上实测 JSON.parse(JSON.stringify(x)) 的失真点，
+
+==============================================================================
+§4 CSV 的 NULL / 空串不可区分性（RFC 4180 未定义 NULL）
+==============================================================================
+  NULL  行 -> sh600519,2026-06-26,
+  空串  行 -> sh600519,2026-06-26,
+  PASS  §4.1 NULL 与空串产出**完全相同**的 CSV 字节  |  sh600519,2026-06-26,
+  PASS  §4.2 故 CSV 无法承载 quote_daily.prev_close_cents 的 NULL 语义（本库存在该列）
+  PASS  §4.3 JSON 能区分二者
+  JSON  NULL -> {"code": "sh600519", "trade_date": "2026-06-26", "prev_close_cents": null}
+  JSON  空串 -> {"code": "sh600519", "trade_date": "2026-06-26", "prev_close_cents": ""}
+
+==============================================================================
+§5 CSV 转义（RFC 4180 合规）正反例
+==============================================================================
+  未转义 -> 1,早餐,食堂,200   (字段数 4，应为 3)
+  已转义 -> 1,"早餐,食堂",200   (字段数 0)
+  PASS  §5.1 未转义使字段数膨胀（逗号被当分隔符）  |  4
+  PASS  §5.2 双引号用 "" 转义  |  "他说""贵"""
+  PASS  §5.3 含换行必须整体引号包裹
+  PASS  §5.4 纯 ASCII 无特殊字符不加引号
+  PASS  §5.5 行终止符用 CRLF（RFC 4180）  |  CRLF
+
+==============================================================================
+§6 PRAGMA defer_foreign_keys 的必要性 —— 真跑（#14 说它是「必需品」，此处实测）
+==============================================================================
+  模拟 D1：D1 恒为 PRAGMA foreign_keys = ON，且用户查询无法关闭。
+  PASS  §6.1 逆序导入、不开 defer -> 被外键拒绝  |  FOREIGN KEY constraint failed
+  PASS  §6.2 按依赖序导入 -> 成功（官方 Troubleshooting 的「right order」）  |  1
+  PASS  §6.3 开 defer + 同事务内修复 -> 逆序导入成功  |  1
+  PASS  §6.4 defer 只在**当前事务**内有效：离开事务仍未修复 -> 失败  |  FOREIGN KEY constraint failed
+  PASS  §6.5 defer 孤零零地写在一条语句里、违规写在**下一条** -> 无效（这是自建多语句导入的陷阱）  |  FOREIGN KEY constraint failed
+
+  结论：官方导入章节只指定 defer_foreign_keys 是**对的**，但它要求「同一事务内修复」；
+        因此自建多语句回导必须把全部语句挤进**一个 batch()**，而这正是不做站内导入的技术理由。
+
+==============================================================================
+§7 回导写行数估算（官方口径：表行 + 每命中一个索引 +1 行）
+==============================================================================
+  PASS  §7.1a 显式索引总数 = 12（#14 的 10 + #9 的 1 + #10 的 1）  |  12
+  PASS  §7.1b entry 上的显式索引 = 4（不是 3：还含 client_ref 唯一索引）  |  n=4 ['ix_entry_biz_date', 'ix_entry_cat_date', 'ix_entry_member_date', 'ux_entry_client_ref']
+  PASS  §7.1c 自动索引（UNIQUE 表约束 / 复合主键）实测 10 个 —— 本估算不计入  |  10
+
+  逐年规模（估算，非实测）：
+    年份 | entry 行 | quote 行 | 回导写行(entry×(1+4) + quote×(1+0)) | 占 10万/天
+       1 |     1825 |     3900 |                      13025 |   13.0%
+       2 |     3650 |     7800 |                      26050 |   26.1%
+       3 |     5475 |    11700 |                      39075 |   39.1%
+       4 |     7300 |    15600 |                      52100 |   52.1%
+       5 |     9125 |    19500 |                      65125 |   65.1%
+       6 |    10950 |    23400 |                      78150 |   78.1%
+       7 |    12775 |    27300 |                      91175 |   91.2%
+       8 |    14600 |    31200 |                     104200 |  104.2%  <== 超限
+       9 |    16425 |    35100 |                     117225 |  117.2%  <== 超限
+      10 |    18250 |    39000 |                     130250 |  130.2%  <== 超限
+  PASS  §7.2 第 1 年单次全量回导远低于 10 万写行  |  13025
+  PASS  §7.3 第 5 年单次全量回导仍 < 10 万写行  |  65125
+  PASS  §7.4 交付边界：单次全量回导首次超过日写额度的年份 = 第 8 年  |  8
+
+  ⚠️ **这是下界，不是上界** —— 本表只计 12 个「显式索引」（手写的 CREATE INDEX），
+     **不计** SQLite 为 UNIQUE 表约束与复合主键自动建立的 `sqlite_autoindex_*`
+     （§7.1c 实测 10 个：sqlite_autoindex_budget_alert_state_1, sqlite_autoindex_corporate_action_1, sqlite_autoindex_cron_run_1, sqlite_autoindex_entry_object_1, sqlite_autoindex_login_attempt_1, sqlite_autoindex_member_1, sqlite_autoindex_position_version_1, sqlite_autoindex_quote_daily_1, sqlite_autoindex_report_delivery_1, sqlite_autoindex_session_1）。
+     那些索引同样要维护、同样计入 D1 的索引写行 ⇒ 真实值高于本表。
+     它的用途是给出「什么时候必须把回导拆到两天做」这个数，而不是预测用量。
+     ⇒ 契约的「已知局限」须写入：**第 8 年起单次全量回导须跨日分批**（且是下界）。
+
+==============================================================================
+汇总
+==============================================================================
+  PASS = 104
+  FAIL = 0
+
+结论: 全部断言通过
