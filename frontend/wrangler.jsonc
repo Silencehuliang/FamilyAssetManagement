@@ -1,0 +1,33 @@
+{
+  // ==========================================================================
+  // Cloudflare Pages 项目配置 —— `frontend/` 是 Pages 的 Root directory。
+  //
+  // 契约落点：docs/specs/deploy-topology.md
+  //   §2.1 布局        —— functions/ 在 Pages 项目根，**不在** dist/ 内
+  //   §2.3 「三必填 + 一禁项」
+  //   §3.1 database_id —— 与 cron-worker/wrangler.jsonc 填**同一个**值
+  //   §6.2 四项配套    —— _routes.json / 不写 _redirects / _headers / Fail open
+  //
+  // 🔴 禁项（§11.1 / §11.2，写错会直接报错）：
+  //      - **绝不能出现 `main`** —— 与 `pages_build_output_dir` 冲突
+  //      - **绝不能出现 `secrets`** —— Pages 配置白名单不含此键
+  //
+  // 🔴 本目录下**只能有这一个** wrangler 配置文件（§11.4，源码只取一个，优先级固定）。
+  // ==========================================================================
+  "$schema": "node_modules/wrangler/config-schema.json",
+
+  "name": "hujia-ledger",
+  "pages_build_output_dir": "./dist",
+  "compatibility_date": "2026-09-17",
+
+  "d1_databases": [
+    {
+      // ⚠️ 占位符：D1 库名与 id 尚未定。建库后必须与 cron-worker/wrangler.jsonc **同步填同一组值**。
+      //    binding 名 `DB` 亦须与 cron-worker 侧一致（代码里都按 `env.DB` 取）。
+      "binding": "DB",
+      "database_name": "REPLACE_ME_DB_NAME",
+      "database_id": "REPLACE_ME_DATABASE_ID"
+      // 注意：**本文件不声明 migrations_dir** —— D1 的操作入口单一化在 cron-worker（§3.2）。
+    }
+  ]
+}

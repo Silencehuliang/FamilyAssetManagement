@@ -1,0 +1,24 @@
+{
+  // functions/ 跑在 workerd 上，**不能与 src/ 共用一份 tsconfig** ——
+  // @cloudflare/workers-types 与 DOM lib 对 Request / Response / fetch 等
+  // 全局名字的声明会互相冲突。故 lib 只留 ES2022，类型只留 workers-types。
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "types": ["@cloudflare/workers-types"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "verbatimModuleSyntax": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["functions"]
+}

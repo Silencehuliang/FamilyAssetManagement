@@ -1,0 +1,44 @@
+{
+  // ==========================================================================
+  // Cron Worker —— 独立部署单元，与 Pages 共享同一个 D1。
+  //
+  // 契约落点：docs/specs/deploy-topology.md
+  //   §2.1 目录定位        —— 本单元 = cron-worker/，独立于 Pages
+  //   §2.3 Worker 侧必填   —— name + main + compatibility_date（官方最低要求）
+  //   §3.2 操作入口单一化  —— **全仓库只有本文件声明 migrations_dir**
+  //   §4.3 部署通道        —— 本地 `wrangler deploy`，不接 CI
+  //
+  // 纪律：
+  //   - 本目录是 D1 的**唯一操作入口**（迁移 / 播种 / 查询都从这里跑）。
+  //   - compatibility_date 必须 ≥ 2026-03-03（该日起 text_decoder_cjk_decoder 默认开启,
+  //     GBK 行情源解码依赖它，见 docs/specs/quote-parsing-contract.md）。
+  //   - 不引入 staging 环境（deploy-topology §11.10）。
+  // ==========================================================================
+  "$schema": "node_modules/wrangler/config-schema.json",
+
+  "name": "hujia-ledger-cron",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-17",
+
+  "triggers": {
+    // 四条表达式，#6 决议「三、Cron 编排」定稿（占用账户配额 4 / 5）。
+    // ⚠️ 改这里必须同步改 src/index.ts 的 DISPATCH 表 —— 分派是逐字符匹配的。
+    "crons": [
+      "30 7 * * MON-FRI", // 行情抓取 + 除权检测    CST 15:30 交易日
+      "0 12 * * *",       // 预算提醒巡检           CST 20:00 每日
+      "0 0 * * MON",      // 周报推送               CST 周一 08:00
+      "10 0 1 * *"        // 月报推送               CST 每月 1 日 08:10（刻意比周报晚 10 分钟）
+    ]
+  },
+
+  "d1_databases": [
+    {
+      // ⚠️ 下面两个值仍是占位符：D1 库名与 id 尚未定（建库后由 `wrangler d1 create` 给出）。
+      //    建库后须把**同一组值**同步写入 frontend/wrangler.jsonc —— 两处必须一致（§3.1）。
+      "binding": "DB",
+      "database_name": "REPLACE_ME_DB_NAME",
+      "database_id": "REPLACE_ME_DATABASE_ID",
+      "migrations_dir": "../migrations"
+    }
+  ]
+}

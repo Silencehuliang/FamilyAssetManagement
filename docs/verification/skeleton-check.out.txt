@@ -1,0 +1,74 @@
+
+==============================================================================
+A. 目录形态（deploy-topology §2.1）
+==============================================================================
+  PASS  A1 frontend/ 是 Pages 项目根
+  PASS  A2 cron-worker/src/index.ts 存在
+  PASS  A3 functions/ 没有落进 dist/（§2.2 事实 2）
+  PASS  A4 frontend/package.json 存在
+  PASS  A4 cron-worker/package.json 存在
+
+==============================================================================
+B. 配置唯一性与禁项（§2.3 / §3.1 / §3.2 / §11.1 / §11.2 / §11.4）
+==============================================================================
+  PASS  B1 frontend/ 只有一份 wrangler 配置（§11.4）
+  PASS  B1 cron-worker/ 只有一份 wrangler 配置（§11.4）
+  PASS  B2 frontend 配置没有 main（§11.1 会直接报错）
+  PASS  B3 frontend 配置没有 secrets（§11.2）
+  PASS  B4 frontend 有 pages_build_output_dir（判定「是否 Pages 配置」的唯一依据）
+  PASS  B5 frontend 不声明 migrations_dir（§3.2 操作入口单一化）
+  PASS  B6 cron-worker 必填 name（§2.3）
+  PASS  B6 cron-worker 必填 main（§2.3）
+  PASS  B6 cron-worker 必填 compatibility_date（§2.3）
+  PASS  B7 只有 cron-worker 声明 migrations_dir（§3.2）
+  PASS  B8 两处 database_id 一致（§3.1）
+  PASS  B9 frontend compatibility_date ≥ 2026-03-03（CJK 解码器）
+  PASS  B9 cron-worker compatibility_date ≥ 2026-03-03（CJK 解码器）
+  NOTE  database_id 仍是占位符（frontend、cron-worker）—— 建库后须同步替换两处
+
+==============================================================================
+C. cron 表达式与分派表一致（#6 决议 + deploy-topology §2.3）
+==============================================================================
+  PASS  C1 crons 恰好 4 条（账户配额 4/5）
+  PASS  C2 crons 集合 == #6 定稿
+  PASS  C3 src/index.ts 的 DISPATCH 键 == crons（改一处漏一处会被抓出来）
+  PASS  C4 行情日那条分派到 2 个任务（#13 R9 两行心跳）
+
+==============================================================================
+D. 静态层（§6.2 四项配套 / §11.5 / offline-sync §7.1）
+==============================================================================
+  PASS  D1 _routes.json 收窄到 /api/*（§6.2 ①）
+  PASS  D2 不写 _redirects（§11.5：会把缺失资产变成 200 HTML）
+  PASS  D3a _headers 含 /sw.js 规则
+  PASS  D3a _headers 含 /manifest.webmanifest 规则
+  PASS  D3a _headers 含 /assets/* 规则
+  PASS  D3b _headers 不碰 /api/*（§11.11：对 Function 响应无效，写了是空操作且误导）
+  PASS  D4 manifest.display == standalone（offline-sync §7.1 硬门禁）
+  PASS  D5 manifest 有 192 与 512 图标（可安装的前提）
+  PASS  D6 public/favicon.ico 存在
+  PASS  D6 public/sw.js 存在
+
+==============================================================================
+E. 构建产物（每条对应契约里一处「靠人眼」的条款）
+==============================================================================
+  PASS  E1 dist/ 顶层无 404.html（§11.6：有它就关闭 SPA 模式）
+  PASS  E2 dist/_routes.json 存在（§6.2 ①）
+  PASS  E3 dist/_headers 存在
+  PASS  E4 dist/index.html 存在
+  PASS  E5 dist/_routes.json 与 public/ 源文件一致
+
+==============================================================================
+F. 前端路由表与页面文件一致（frontend-ia §2.1 / §3.1）
+==============================================================================
+  PASS  F1 路由表恰好 12 条（§3.1 的「12 页」口径）
+  PASS  F2 路由键集合 == §3.1 清单
+  PASS  F3 不含 `assets`（变体 B 独有产物，*不*进定型清单）
+  PASS  F4 12 个路由键都有对应页面文件
+  PASS  F5 页面文件恰好 12 个（PageStub.tsx 不算）
+  PASS  F6 底栏恰好四个 Tab（§2.1「恰好四个」）
+  PASS  F7 Tab 集合 == home/ledger/entry/stock，且 `me` 不在其中
+  PASS  F8 凸起的那一格是 `entry`（§2.1 中央凸起）
+
+==============================================================================
+合计：45 通过 / 0 失败 / 0 跳过
+==============================================================================

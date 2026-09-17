@@ -1,0 +1,262 @@
+/* ============================================================================
+ * 全局样式 —— 骨架阶段的最小可用集
+ *
+ * 契约落点：docs/specs/frontend-ia.md §2.1（导航壳）、§9（全局元件）
+ *
+ * 形态前提（§0）：**移动端为主（PWA），Web 为辅**。
+ * 故这里只做「移动优先 + 桌面加宽」两档，宽屏断点的具体像素值仍留实现期（§11）。
+ * ========================================================================== */
+
+:root {
+  --bg: #f9fafb;
+  --panel: #ffffff;
+  --line: #e5e7eb;
+  --txt: #111827;
+  --dim: #6b7280;
+  --accent: #34d399;
+  --offline: #f59e0b;
+  --tabbar-h: 56px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0b1220;
+    --panel: #111827;
+    --line: #1f2937;
+    --txt: #f9fafb;
+    --dim: #9ca3af;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--txt);
+  font: 15px/1.55 system-ui, -apple-system, "Segoe UI", "PingFang SC",
+    "Microsoft YaHei", sans-serif;
+  -webkit-text-size-adjust: 100%;
+}
+
+code {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 0.92em;
+  color: var(--dim);
+}
+
+/* ---------------------------------------------------------------- 外壳 ---- */
+
+.shell {
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+  /* 底栏是 fixed，内容留出空间；safe-area 供 iOS 独立窗口贴边 */
+  padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px));
+}
+
+.shell__topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  padding-top: calc(10px + env(safe-area-inset-top, 0px));
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+
+.shell__avatar {
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--bg);
+  color: var(--txt);
+  font: inherit;
+  cursor: pointer;
+}
+
+.shell__title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.shell__net {
+  font-size: 12px;
+}
+
+.shell__net--on {
+  color: var(--accent);
+}
+
+.shell__net--off {
+  color: var(--offline);
+}
+
+.shell__content {
+  flex: 1;
+  padding: 14px;
+}
+
+.route-fallback {
+  color: var(--dim);
+  text-align: center;
+}
+
+/* ------------------------------------------------------- 全局横幅 / 指示器 - */
+
+.banners {
+  padding: 0 14px;
+}
+
+.banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 8px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  font-size: 13px;
+}
+
+.banner--offline {
+  border-color: var(--offline);
+}
+
+.queue-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin: 8px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--txt);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.queue-indicator__net {
+  color: var(--dim);
+}
+
+/* ------------------------------------------------------------- 底栏 Tab -- */
+
+.tabbar {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 30;
+  display: flex;
+  height: var(--tabbar-h);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+}
+
+.tabbar__tab {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  color: var(--dim);
+  font-size: 11px;
+  text-decoration: none;
+}
+
+.tabbar__dot {
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--bg);
+}
+
+/* 凸起的那一格（`entry`）—— 视觉上高于其余三个（frontend-ia §2.1） */
+.tabbar__tab--raised .tabbar__dot {
+  width: 38px;
+  height: 28px;
+  border-radius: 9px;
+}
+
+.tabbar__tab--on {
+  color: var(--txt);
+  font-weight: 600;
+}
+
+.tabbar__tab--on .tabbar__dot {
+  background: var(--accent);
+}
+
+/* ------------------------------------------------------------ 页面存根 --- */
+
+.page-stub__title {
+  margin: 4px 0 6px;
+  font-size: 20px;
+}
+
+.page-stub__meta {
+  margin: 0 0 10px;
+  color: var(--dim);
+  font-size: 12px;
+}
+
+.page-stub__watchout {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--offline);
+  border-radius: 6px;
+  background: var(--panel);
+  font-size: 13px;
+}
+
+.page-stub__todo {
+  color: var(--dim);
+  font-size: 13px;
+}
+
+/* --------------------------------------------------------------- 桌面 ---- */
+
+/* 桌面形态：**同路由不分叉**（frontend-ia §5）—— 只加宽，不换结构。 */
+@media (min-width: 720px) {
+  .shell__content,
+  .banners {
+    max-width: 760px;
+    width: 100%;
+    margin-right: auto;
+    margin-left: auto;
+  }
+
+  .tabbar {
+    max-width: 760px;
+    right: auto;
+    left: 50%;
+    transform: translateX(-50%);
+    border-right: 1px solid var(--line);
+    border-left: 1px solid var(--line);
+  }
+}

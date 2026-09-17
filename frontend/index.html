@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- viewport-fit=cover：配合 iOS 安全区（PWA 独立窗口下底栏贴边）。 -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <title>家庭财务</title>
+
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+
+    <!-- 🔴 manifest.display = standalone 的配套（offline-sync-contract §7.1 硬门禁）。
+         display 写错 ⇒ ITP 每 7 天清掉 SW 注册与缓存 ⇒ 离线队列不可靠。
+         这两种检测方式在 iOS 上并存，两条都留着；判定以 matchMedia 为准，
+         navigator.standalone 兜底（frontend-ia §9.3）。 -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="家庭财务" />
+    <meta name="theme-color" content="#111827" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#111827" media="(prefers-color-scheme: dark)" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

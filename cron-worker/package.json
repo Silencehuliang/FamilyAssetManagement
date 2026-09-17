@@ -1,0 +1,18 @@
+{
+  "name": "hujia-ledger-cron",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Cron Worker —— 行情抓取 / 除权检测 / 预算提醒 / 周报 / 月报推送。与 Pages 共享同一个 D1。",
+  "scripts": {
+    "dev": "wrangler dev",
+    "dev:scheduled": "wrangler dev --test-scheduled",
+    "typecheck": "tsc --noEmit",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260917.1",
+    "typescript": "^7.0.2",
+    "wrangler": "^4.133.0"
+  }
+}
