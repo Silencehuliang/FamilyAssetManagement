@@ -156,8 +156,10 @@ export interface GenerateResult {
 }
 
 /**
- * 补记截至 today 的全部到期支出(幂等):已存在同 id 记录一律跳过。
- * 规则指向的分类/成员缺失或成员停用时跳过该规则(不阻断整轮同步)。
+ * 补记截至 today 的全部到期支出:以规则上的 generatedThrough 游标推进,
+ * 只生成游标之后(含今日)的期次 —— 因此删除某笔已补记支出不会被下一轮复活。
+ * 同 id 已存在时跳过(多端并发的幂等保险);规则指向的分类/成员缺失或
+ * 成员停用时跳过该规则且不推进游标(条件恢复后会补上)。
  */
 export function generateDueExpenses(
   ledger: LedgerData,
@@ -179,7 +181,12 @@ export function generateDueExpenses(
     const member = memberById.get(rule.memberId)
     if (!member || member.disabled) continue
 
-    for (const date of dueDates(rule, rule.startDate, today)) {
+    const from = rule.generatedThrough ? addDays(rule.generatedThrough, 1) : rule.startDate
+    if (from > today) continue
+    const dates = dueDates(rule, from, today)
+    if (dates.length === 0) continue
+
+    for (const date of dates) {
       const id = `rec-${rule.id}-${date}`
       if (existing.has(id)) continue
       existing.add(id)
@@ -199,6 +206,9 @@ export function generateDueExpenses(
       })
       expenseIds.push(id)
     }
+    // 游标推进到本轮覆盖的最后到期日(更新 updatedAt 以便经 LWW 同步到其他设备)
+    rule.generatedThrough = dates[dates.length - 1]
+    rule.updatedAt = now
   }
   return { generated: expenseIds.length, expenseIds }
 }

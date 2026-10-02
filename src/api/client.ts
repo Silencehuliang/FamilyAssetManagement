@@ -199,7 +199,7 @@ export class ApiClient implements LedgerApi {
     return body.member
   }
 
-  /** 修改自己的密码(T13);当前密码错误(401 wrong_password)不清会话 */
+  /** 修改自己的密码(T13);当前密码错误(401 wrong_password)不清会话,会话过期仍会登出 */
   async changePassword(input: ChangePasswordInput): Promise<Member> {
     const body = await this.request<{ member: Member }>('/api/auth/password', {
       method: 'POST',
@@ -287,8 +287,10 @@ export class ApiClient implements LedgerApi {
       const code = typeof body?.error === 'string' ? body.error : 'http_error'
       const message =
         typeof body?.message === 'string' ? body.message : `请求失败(${response.status})`
-      // 仅对携带会话的已认证请求按「会话过期」处理;未登录探针的 401 不清理会话、不触发过期提示
-      if (response.status === 401 && auth && this.session && !keepSession) {
+      // 仅对携带会话的已认证请求按「会话过期」处理;未登录探针的 401 不清理会话、不触发过期提示。
+      // keepSession 只豁免「当前密码错误」这类业务性 401,真正的会话过期仍按过期处理。
+      const benignKeepSession = keepSession && code === 'wrong_password'
+      if (response.status === 401 && auth && this.session && !benignKeepSession) {
         this.clearSession()
         this.onUnauthorized()
       }

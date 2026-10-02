@@ -64,6 +64,11 @@ export interface RecurringExpense {
   enabled: boolean
   /** 规则创建者(成员可维护自己的规则;旧数据缺省时以 memberId 兜底) */
   createdBy?: MemberId
+  /**
+   * 补记游标:已补记到哪一天(含)。只生成该日之后的期次,
+   * 因此删除某笔已补记支出不会被下一轮补记复活。
+   */
+  generatedThrough?: DateKey
   createdAt: string
   updatedAt: string
 }

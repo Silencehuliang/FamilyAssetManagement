@@ -8,7 +8,6 @@ import {
   monthsInRange,
   monthTrend,
   trendTotalCents,
-  yearTrend,
 } from './stats'
 
 function add(
@@ -59,18 +58,6 @@ describe('monthsInRange / monthTrend', () => {
       { month: '2026-10', totalCents: 2500, count: 2 },
     ])
     expect(trendTotalCents(points)).toBe(3500)
-  })
-
-  it('年视图固定返回 12 个月,含未来月份的零值', () => {
-    const ledger = fixtureLedger()
-    add(ledger, 700, '2026-03-15', LUNCH_CATEGORY)
-
-    const points = yearTrend(ledger, '2026-10')
-
-    expect(points).toHaveLength(12)
-    expect(points[0]).toEqual({ month: '2026-01', totalCents: 0, count: 0 })
-    expect(points[2]).toEqual({ month: '2026-03', totalCents: 700, count: 1 })
-    expect(points[11]?.month).toBe('2026-12')
   })
 })
 

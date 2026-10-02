@@ -43,16 +43,6 @@ export function monthTrend(ledger: LedgerData, months: MonthKey[]): MonthPoint[]
   })
 }
 
-/** 年视图:anchor 所在自然年的 12 个月(升序,无数据补零) */
-export function yearTrend(ledger: LedgerData, anchor: MonthKey): MonthPoint[] {
-  const year = anchor.slice(0, 4)
-  const months = Array.from(
-    { length: 12 },
-    (_, index) => `${year}-${String(index + 1).padStart(2, '0')}`,
-  )
-  return monthTrend(ledger, months)
-}
-
 export type CategoryLevel = 'parent' | 'child'
 
 export interface CategorySlice {

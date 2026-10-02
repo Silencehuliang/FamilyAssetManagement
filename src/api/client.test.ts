@@ -302,3 +302,28 @@ describe('未登录探针的 401(评审回归)', () => {
     expect(unauthorized).toBe(0)
   })
 })
+
+describe('changePassword 的会话处理(评审回归)', () => {
+  it('会话过期(unauthorized)时仍然清会话并通知', async () => {
+    const storage = memoryStorage()
+    storage.setItem('fl.session', JSON.stringify(sessionFixture()))
+    let unauthorized = 0
+    const { impl } = fakeFetch(() =>
+      jsonResponse({ error: 'unauthorized', message: '会话无效或已过期' }, 401),
+    )
+    const client = new ApiClient({
+      baseUrl: BASE,
+      fetchImpl: impl,
+      storage,
+      onUnauthorized: () => {
+        unauthorized += 1
+      },
+    })
+
+    await expect(
+      client.changePassword({ currentPassword: 'a-123456', newPassword: 'b-123456' }),
+    ).rejects.toMatchObject({ code: 'unauthorized' })
+    expect(client.getSession()).toBeNull()
+    expect(unauthorized).toBe(1)
+  })
+})

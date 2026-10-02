@@ -363,3 +363,27 @@ describe('addRecurring / updateRecurring / removeRecurring', () => {
     ).toThrowError(/不存在/)
   })
 })
+
+describe('补记游标(评审回归)', () => {
+  it('删除已补记的支出后不会被下一轮补记复活', () => {
+    const ledger = fixtureLedger()
+    ledger.meta.recurring = [makeRule({ frequency: 'monthly', startDate: '2026-10-01' })]
+    const first = generateDueExpenses(ledger, '2026-12-15', NOW)
+    expect(first.expenseIds).toEqual([
+      'rec-r-1-2026-10-01',
+      'rec-r-1-2026-11-01',
+      'rec-r-1-2026-12-01',
+    ])
+
+    // 用户删掉 11 月那笔(领域删除 + 离线队列登记的生产路径)
+    const bucket = ledger.months['2026-11']
+    if (bucket) bucket.expenses = bucket.expenses.filter((e) => e.id !== 'rec-r-1-2026-11-01')
+
+    const second = generateDueExpenses(ledger, '2026-12-15', NOW)
+    expect(second.generated).toBe(0)
+    expect(ledger.months['2026-11']?.expenses).toHaveLength(0)
+    // 后续期次不受影响:进入 2027 年照常补记
+    const third = generateDueExpenses(ledger, '2027-01-02', NOW)
+    expect(third.expenseIds).toEqual(['rec-r-1-2027-01-01'])
+  })
+})
