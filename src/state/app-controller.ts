@@ -22,8 +22,10 @@ import { ApiError } from '../api/client'
 import {
   addCategory as addCategoryInLedger,
   addExpense,
+  type BudgetPatch,
   type Category,
   type CategoryId,
+  clearBudget as clearBudgetInLedger,
   createEmptyLedger,
   deleteCategory as deleteCategoryInLedger,
   deleteExpense as deleteExpenseInLedger,
@@ -32,6 +34,8 @@ import {
   type LedgerData,
   type Member,
   type MonthKey,
+  setCategoryBudget as setCategoryBudgetInLedger,
+  setTotalBudget as setTotalBudgetInLedger,
   updateCategory as updateCategoryInLedger,
   updateExpense as updateExpenseInLedger,
 } from '../domain'
@@ -326,6 +330,41 @@ export class AppController {
     const actor = this.currentActor()
     deleteCategoryInLedger(this.ledger, actor, id, migrateToId)
     this.queue.record({ type: 'delete-category', id })
+    await this.persistLedger()
+    void this.syncManager?.syncNow()
+  }
+
+  /**
+   * 设置/修改月度预算(T11,仅管理员;领域层二次门禁):
+   * patch.totalCents 设置总预算、null 清除;categoryId + categoryCents 设置/清除分类预算。
+   * 本地生效 → 写穿 IndexedDB → 后台同步(budgets.json 由管理员推送,成员端只拉)。
+   */
+  async setBudget(month: MonthKey, patch: BudgetPatch): Promise<void> {
+    const actor = this.currentActor()
+    if (patch.totalCents !== undefined) {
+      setTotalBudgetInLedger(this.ledger, actor, month, patch.totalCents)
+    }
+    if (patch.categoryId !== undefined) {
+      setCategoryBudgetInLedger(
+        this.ledger,
+        actor,
+        month,
+        patch.categoryId,
+        patch.categoryCents ?? null,
+      )
+    }
+    await this.persistLedger()
+    void this.syncManager?.syncNow()
+  }
+
+  /**
+   * 清除整月预算(T11,仅管理员):本地删除并登记 clear-budget 离线操作,
+   * 由 replay 在同步时补删远端,防止其他设备的旧预算被合并回来。
+   */
+  async clearBudget(month: MonthKey): Promise<void> {
+    const actor = this.currentActor()
+    clearBudgetInLedger(this.ledger, actor, month)
+    this.queue.record({ type: 'clear-budget', month })
     await this.persistLedger()
     void this.syncManager?.syncNow()
   }

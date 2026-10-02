@@ -6,6 +6,8 @@
   --brand: #16a34a;
   --brand-dim: #dcfce7;
   --border: #e2e8f0;
+  --danger: #dc2626;
+  --danger-dim: #fee2e2;
   --chart-1: #16a34a;
   --chart-2: #0ea5e9;
   --chart-3: #f59e0b;
@@ -25,6 +27,8 @@
     --brand: #22c55e;
     --brand-dim: #14301f;
     --border: #1e293b;
+    --danger: #f87171;
+    --danger-dim: #3f1d1d;
     --chart-1: #22c55e;
     --chart-2: #38bdf8;
     --chart-3: #fbbf24;
@@ -841,4 +845,114 @@ body {
   height: 100%;
   border-radius: 999px;
   background: var(--brand);
+}
+
+/* 预算页(T11):月份标题、进度条与达成标记 */
+.month-title {
+  flex: 1;
+  text-align: center;
+  font-size: 15px;
+}
+
+.budget-numbers {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin: 4px 0 12px;
+}
+
+.budget-numbers > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.budget-numbers strong {
+  font-size: 17px;
+  font-variant-numeric: tabular-nums;
+}
+
+.progress-track {
+  height: 10px;
+  border-radius: 999px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--brand);
+  transition: width 0.2s ease;
+}
+
+.progress-over {
+  background: var(--danger);
+}
+
+.amount-over {
+  color: var(--danger);
+}
+
+.amount-ok {
+  color: var(--brand);
+}
+
+.budget-alert {
+  margin: 8px 0 0;
+}
+
+.budget-row-meta {
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+.outcome {
+  display: inline-block;
+  font-size: 12px;
+  border-radius: 999px;
+  padding: 1px 10px;
+  border: 1px solid currentColor;
+}
+
+.outcome-ok {
+  color: var(--brand);
+  background: var(--brand-dim);
+}
+
+.outcome-over {
+  color: var(--danger);
+  background: var(--danger-dim);
+}
+
+.history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.history-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.history-item:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.history-month {
+  appearance: none;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font-size: 13px;
+  padding: 0;
+  cursor: pointer;
 }

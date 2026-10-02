@@ -2,12 +2,12 @@ import { type ReactNode, useEffect, useState } from 'react'
 import { SyncBadge } from './components/SyncBadge'
 import { TabIcon } from './components/TabIcon'
 import { AddExpensePage } from './pages/AddExpensePage'
+import { BudgetPage } from './pages/BudgetPage'
 import { CategoriesPage } from './pages/CategoriesPage'
 import { EntriesPage } from './pages/EntriesPage'
 import { LoginPage } from './pages/LoginPage'
 import { MembersPage } from './pages/MembersPage'
 import { MePage } from './pages/MePage'
-import { PlaceholderPage } from './pages/PlaceholderPage'
 import { SetupPage } from './pages/SetupPage'
 import { StatsPage } from './pages/StatsPage'
 import type { AppState } from './state/app-controller'
@@ -127,7 +127,7 @@ function Shell({ state }: { state: AppState }) {
             {tab === 'add' ? <AddExpensePage controller={appController} state={state} /> : null}
             {tab === 'entries' ? <EntriesPage controller={appController} state={state} /> : null}
             {tab === 'stats' ? <StatsPage state={state} /> : null}
-            {tab === 'budget' ? <PlaceholderPage title="预算管理" note="T11 交付" /> : null}
+            {tab === 'budget' ? <BudgetPage controller={appController} state={state} /> : null}
             {tab === 'me' ? (
               <MePage
                 controller={appController}

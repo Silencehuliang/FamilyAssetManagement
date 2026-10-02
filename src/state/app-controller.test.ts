@@ -602,6 +602,96 @@ describe('AppController 分类管理(T8)', () => {
   })
 })
 
+describe('AppController 预算(T11)', () => {
+  async function readyController(actor: Member = ADMIN) {
+    const api = new FakeApi()
+    api.session = sessionOf(actor)
+    api.members = [ADMIN, XIAOHONG]
+    const made = makeController({
+      api,
+      now: () => new Date('2026-10-02T08:30:00.000Z'),
+    })
+    await made.controller.boot()
+    return made
+  }
+
+  it('管理员设置总预算与分类预算:写穿本地并同步到 budgets.json', async () => {
+    const { controller, store, endpoint } = await readyController()
+
+    await controller.setBudget('2026-10', { totalCents: 300000 })
+    await controller.setBudget('2026-10', { categoryId: 'cat-dining-2', categoryCents: 50000 })
+
+    expect(controller.getLedger().meta.budgets['2026-10']).toEqual({
+      totalCents: 300000,
+      categoryCents: { 'cat-dining-2': 50000 },
+    })
+    expect((await store.loadLedger())?.meta.budgets['2026-10']?.totalCents).toBe(300000)
+
+    await controller.retrySync()
+    const files = await endpoint.listFiles()
+    expect(files['ledger/meta/budgets.json']?.content).toContain('"totalCents": 300000')
+    expect(files['ledger/meta/budgets.json']?.content).toContain('"cat-dining-2": 50000')
+  })
+
+  it('清除整月预算:登记 clear-budget 队列,同步后远端清空且队列回落', async () => {
+    const api = new FakeApi()
+    api.session = sessionOf(ADMIN)
+    api.members = [ADMIN, XIAOHONG]
+    let online = false
+    const { controller, store, endpoint } = makeController({
+      api,
+      isOnline: () => online,
+      now: () => new Date('2026-10-02T08:30:00.000Z'),
+    })
+    await controller.boot()
+
+    await controller.setBudget('2026-10', { totalCents: 300000 })
+    await controller.clearBudget('2026-10')
+
+    expect(controller.getLedger().meta.budgets['2026-10']).toBeUndefined()
+    await expect(store.loadQueueOps()).resolves.toEqual([
+      { type: 'clear-budget', month: '2026-10' },
+    ])
+
+    // 恢复联网:replay 回放 clear-budget,远端 budgets.json 清空、队列回落
+    online = true
+    await controller.retrySync()
+    expect((await endpoint.listFiles())['ledger/meta/budgets.json']?.content).toContain(
+      '"budgets": {}',
+    )
+    await expect(store.loadQueueOps()).resolves.toEqual([])
+  })
+
+  it('普通成员设置/清除预算被领域层拒绝,账本与队列不变', async () => {
+    const { controller, store } = await readyController(XIAOHONG)
+
+    await expect(controller.setBudget('2026-10', { totalCents: 100000 })).rejects.toThrow(
+      /仅管理员/,
+    )
+    await expect(
+      controller.setBudget('2026-10', { categoryId: 'cat-dining-2', categoryCents: 10000 }),
+    ).rejects.toThrow(/仅管理员/)
+    await expect(controller.clearBudget('2026-10')).rejects.toThrow(/仅管理员/)
+
+    expect(controller.getLedger().meta.budgets).toEqual({})
+    await expect(store.loadQueueOps()).resolves.toEqual([])
+  })
+
+  it('非法金额与月份格式被拒绝', async () => {
+    const { controller } = await readyController()
+
+    await expect(controller.setBudget('2026-10', { totalCents: 0 })).rejects.toMatchObject({
+      code: 'invalid_amount',
+    })
+    await expect(controller.setBudget('2026-13', { totalCents: 100 })).rejects.toMatchObject({
+      code: 'invalid_month',
+    })
+    await expect(
+      controller.setBudget('2026-10', { categoryId: 'cat-dining', categoryCents: 100 }),
+    ).rejects.toMatchObject({ code: 'category_not_leaf' })
+  })
+})
+
 describe('AppController 成员管理(T9)', () => {
   async function readyController(actor: Member = ADMIN) {
     const api = new FakeApi()
