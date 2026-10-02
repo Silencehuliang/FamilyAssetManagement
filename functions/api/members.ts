@@ -7,13 +7,7 @@ import {
   requireActiveAdmin,
   requireActiveAuth,
 } from '../../src/lib/auth/service'
-import {
-  HttpError,
-  handleApi,
-  optionalString,
-  readJsonBody,
-  requireString,
-} from '../../src/lib/http'
+import { HttpError, handleApi, readJsonBody, requireString } from '../../src/lib/http'
 
 /**
  * GET /api/members —— 已认证成员获取成员列表(去凭据,凭据永不过代理)。
@@ -57,15 +51,10 @@ export const onRequestPost = ({
     const deps = createAuthDeps(env)
     await requireActiveAdmin(request, deps)
     const body = await readJsonBody(request)
-    const role = optionalString(body.role)
-    if (role !== undefined && role !== 'admin' && role !== 'member') {
-      throw new HttpError(400, 'invalid_request', 'role 只能是 admin 或 member')
-    }
     return createMember(deps, {
       username: requireString(body.username, 'username'),
       displayName: requireString(body.displayName, 'displayName'),
       password: requireString(body.password, 'password'),
-      role,
     })
   })
 }

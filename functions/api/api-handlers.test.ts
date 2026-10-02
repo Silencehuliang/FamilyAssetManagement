@@ -413,7 +413,7 @@ describe('POST /api/members(管理员建号,T9)', () => {
     expect(await jsonOf(response)).toMatchObject({ error: 'member_duplicated' })
   })
 
-  it('普通成员调用返回 403;缺字段返回 400;非法 role 返回 400', async () => {
+  it('普通成员调用返回 403;缺字段返回 400;role 参数被忽略,一律创建为普通成员', async () => {
     const member = await seededMember('xiaohong', 'pw-123456')
     stub = githubStub({ [MEMBERS_FILE]: serializeMembers([member]) })
     vi.stubGlobal('fetch', stub.impl)
@@ -441,7 +441,7 @@ describe('POST /api/members(管理员建号,T9)', () => {
     })
     expect(missing.status).toBe(400)
 
-    const badRole = await membersPost({
+    const ignoredRole = await membersPost({
       request: post(
         '/api/members',
         { username: 'dali', displayName: '大力', password: 'pw-123456', role: 'owner' },
@@ -449,8 +449,10 @@ describe('POST /api/members(管理员建号,T9)', () => {
       ),
       env: ENV,
     })
-    expect(badRole.status).toBe(400)
-    expect(await jsonOf(badRole)).toMatchObject({ error: 'invalid_request' })
+    expect(ignoredRole.status).toBe(200)
+    expect(await jsonOf(ignoredRole)).toMatchObject({
+      member: { username: 'dali', role: 'member' },
+    })
   })
 })
 

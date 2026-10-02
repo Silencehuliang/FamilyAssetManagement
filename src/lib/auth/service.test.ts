@@ -292,15 +292,14 @@ describe('createMember(管理员建号,T9)', () => {
     ).resolves.toMatchObject({ member: { id: result.member.id } })
   })
 
-  it('可显式创建管理员角色', async () => {
+  it('创建的账户一律是普通成员(管理员仅由初始化产生)', async () => {
     const store = await storeWithRecords(await seedRecord('ada', 'root-pw-123', { role: 'admin' }))
     const result = await createMember(makeDeps(store), {
-      username: 'guanli',
-      displayName: '管理二号',
+      username: 'xiaohong',
+      displayName: '小红',
       password: 'pw-123456',
-      role: 'admin',
     })
-    expect(result.member.role).toBe('admin')
+    expect(result.member.role).toBe('member')
   })
 
   it('用户名重复返回 409 且不写入', async () => {

@@ -2,7 +2,7 @@
  * 账户服务:一次性初始化、登录、改密、管理员建号/停用/重置(ADR-0002)。
  * 依赖注入 LedgerStore,便于在 Vitest 中以内存仓库做行为级测试。
  */
-import type { Member, Role } from '../../domain/types'
+import type { Member } from '../../domain/types'
 import type { LedgerStore } from '../github'
 import { createLedgerStore } from '../github'
 import { HttpError } from '../http'
@@ -177,8 +177,6 @@ export interface CreateMemberInput {
   username: string
   displayName: string
   password: string
-  /** 缺省 member;可显式创建另一个管理员 */
-  role?: Role
 }
 
 /** 管理员创建成员账户:用户名去空白后唯一,409 冲突;密码即刻哈希落盘 */
@@ -202,7 +200,8 @@ export async function createMember(
     id,
     username,
     displayName,
-    role: input.role ?? 'member',
+    // 规格(T9):管理员创建的账户一律是普通成员;管理员仅由初始化产生
+    role: 'member',
     disabled: false,
     createdAt: now().toISOString(),
     ...(await hashPassword(input.password)),
@@ -254,7 +253,12 @@ export interface MemberStatusLookupOptions {
   cache?: Map<string, MemberStatusCacheEntry>
 }
 
-export const DEFAULT_MEMBER_STATUS_TTL_MS = 30_000
+/**
+ * 停用状态缓存 TTL。默认 0 = 不缓存,每个鉴权请求都读 members.json ——
+ * 「停用立即生效」是 T9 的验收标准,多 isolate 下只能靠不缓存来保证;
+ * 家庭规模下每请求一次 GitHub 读取完全可接受。大于 0 仅用于测试/降载场景。
+ */
+export const DEFAULT_MEMBER_STATUS_TTL_MS = 0
 
 const memberStatusCache = new Map<string, MemberStatusCacheEntry>()
 

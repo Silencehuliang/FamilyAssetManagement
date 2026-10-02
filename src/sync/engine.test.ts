@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import type { Expense, RecurringExpense } from '../domain'
-import { addExpense, createEmptyLedger } from '../domain'
-import { DINNER_CATEGORY, fixtureLedger, LUNCH_CATEGORY, XIAOHONG } from '../domain/fixtures'
+import { addExpense, createEmptyLedger, deleteCategory } from '../domain'
+import { ADMIN, DINNER_CATEGORY, fixtureLedger, LUNCH_CATEGORY, XIAOHONG } from '../domain/fixtures'
 import type { PutResult, RemoteFile, SyncEndpoint } from './endpoint'
 import { sync } from './engine'
 import { filesToLedger, ledgerToFiles, monthFilePath } from './files'
 import { InMemoryEndpoint } from './in-memory'
+import { PendingQueue, replay } from './queue'
 
 /** 成员数据不属同步文件集(服务端专管):比较账本内容时忽略 members */
 function sansMembers<L extends { meta: { members: unknown[] } }>(l: L): L {
@@ -395,5 +396,33 @@ describe('adminFilesPolicy(成员端采纳管理员维护的分类/预算)', () 
 
     expect(local.meta.categories.find((c) => c.id === 'c-1')?.name).toBe('本地旧名')
     expect(local.meta.budgets).toEqual({ '2026-10': { totalCents: 1, categoryCents: {} } })
+  })
+})
+
+describe('分类迁移的跨设备传播(评审回归)', () => {
+  it('迁移刷新 updatedAt,持有旧副本的设备同步后采纳迁移结果而非回退', async () => {
+    const a = fixtureLedger()
+    addExpense(
+      a,
+      { amountCents: 100, date: '2026-10-02', categoryId: LUNCH_CATEGORY },
+      { actor: XIAOHONG, now: T0, newId: 'e-mig' },
+    )
+    const shared = new InMemoryEndpoint()
+    await sync(a, shared)
+
+    // 成员 B 的本地副本:迁移发生前的状态
+    const memberB = filesToLedger(await contentsOf(shared))
+
+    // 管理员 A 迁移午餐 → 晚餐并删除午餐(时间戳晚于 T0);删除经离线队列登记后回放(生产路径)
+    deleteCategory(a, ADMIN, LUNCH_CATEGORY, DINNER_CATEGORY, '2026-11-01T00:00:00.000Z')
+    const queue = new PendingQueue()
+    queue.record({ type: 'delete-category', id: LUNCH_CATEGORY })
+    await replay(queue, a, shared)
+
+    // 成员 B 同步:支出按新 updatedAt 采纳,分类采用远端
+    await sync(memberB, shared, { adminFilesPolicy: 'remote-wins' })
+
+    expect(memberB.months['2026-10']?.expenses[0]?.categoryId).toBe(DINNER_CATEGORY)
+    expect(memberB.meta.categories.some((c) => c.id === LUNCH_CATEGORY)).toBe(false)
   })
 })

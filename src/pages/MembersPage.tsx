@@ -7,10 +7,9 @@ interface CreateForm {
   username: string
   displayName: string
   password: string
-  role: 'member' | 'admin'
 }
 
-const EMPTY_CREATE: CreateForm = { username: '', displayName: '', password: '', role: 'member' }
+const EMPTY_CREATE: CreateForm = { username: '', displayName: '', password: '' }
 
 function errorText(err: unknown): string {
   if (err instanceof DomainError || err instanceof Error) return err.message
@@ -61,7 +60,6 @@ export function MembersPage({
         username: form.username,
         displayName: form.displayName,
         password: form.password,
-        role: form.role,
       }),
       '成员已创建,可以登录记一笔了',
       () => setForm(EMPTY_CREATE),
@@ -184,23 +182,11 @@ export function MembersPage({
         <label className="field">
           <span>初始密码</span>
           <input
-            type="text"
+            type="password"
             value={form.password}
             placeholder="交给成员后请尽快修改"
             onChange={(event) => setForm((f) => ({ ...f, password: event.target.value }))}
           />
-        </label>
-        <label className="field">
-          <span>角色</span>
-          <select
-            value={form.role}
-            onChange={(event) =>
-              setForm((f) => ({ ...f, role: event.target.value === 'admin' ? 'admin' : 'member' }))
-            }
-          >
-            <option value="member">成员</option>
-            <option value="admin">管理员</option>
-          </select>
         </label>
         <button
           type="button"
@@ -219,7 +205,7 @@ export function MembersPage({
             <label className="field">
               <span>新密码</span>
               <input
-                type="text"
+                type="password"
                 value={resetPassword}
                 placeholder="设置后请告知该成员"
                 onChange={(event) => setResetPassword(event.target.value)}
