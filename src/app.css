@@ -72,10 +72,13 @@ body {
 
 .app-main {
   flex: 1;
-  display: flex;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+.app-centered {
   align-items: center;
   justify-content: center;
-  padding: 24px;
 }
 
 .placeholder {
@@ -112,4 +115,325 @@ body {
 
 .tab-active {
   color: var(--brand);
+}
+
+/* 同步徽标状态色 */
+.sync-badge[data-state="synced"] {
+  color: var(--brand);
+  border-color: var(--brand);
+  background: var(--brand-dim);
+}
+
+.sync-badge[data-state="syncing"] {
+  color: #b45309;
+  border-color: #f59e0b;
+}
+
+.sync-badge[data-state="error"] {
+  color: #dc2626;
+  border-color: #dc2626;
+}
+
+/* 登录 / 初始化向导 */
+.auth-page {
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 380px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 24px;
+}
+
+.auth-title {
+  margin: 0 0 4px;
+  font-size: 22px;
+}
+
+.auth-subtitle {
+  margin: 0 0 20px;
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.field {
+  display: block;
+  margin-bottom: 14px;
+}
+
+.field span {
+  display: block;
+  font-size: 13px;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+
+.field input,
+.field textarea,
+.field select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  font-size: 15px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.field input:focus,
+.field textarea:focus,
+.field select:focus {
+  outline: 2px solid var(--brand);
+  outline-offset: -1px;
+}
+
+.form-error {
+  color: #dc2626;
+  font-size: 13px;
+  margin: 0 0 12px;
+}
+
+.primary-button {
+  width: 100%;
+  appearance: none;
+  border: 0;
+  border-radius: 10px;
+  background: var(--brand);
+  color: #ffffff;
+  font-size: 15px;
+  font-weight: 600;
+  padding: 12px;
+  cursor: pointer;
+}
+
+.primary-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.danger-button {
+  width: 100%;
+  appearance: none;
+  border: 1px solid #dc2626;
+  border-radius: 10px;
+  background: none;
+  color: #dc2626;
+  font-size: 15px;
+  padding: 12px;
+  cursor: pointer;
+}
+
+.link-button {
+  display: block;
+  width: 100%;
+  margin-top: 14px;
+  appearance: none;
+  border: 0;
+  background: none;
+  color: var(--brand);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+/* 通用页面与卡片 */
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 16px;
+}
+
+.card-title {
+  margin: 0 0 8px;
+  font-size: 14px;
+  color: var(--text-dim);
+  font-weight: 500;
+}
+
+.member-name {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.member-meta {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--text-dim);
+  line-height: 1.6;
+}
+
+.card .primary-button,
+.card .danger-button {
+  margin-top: 12px;
+}
+
+.placeholder-card {
+  background: var(--surface);
+  border: 1px dashed var(--border);
+  border-radius: 14px;
+  padding: 40px 16px;
+  text-align: center;
+}
+
+.placeholder-title {
+  margin: 0 0 6px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.placeholder-note {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+/* 记一笔:本月累计 / 今日小计 */
+.summary-card {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  background: var(--brand);
+  color: #ffffff;
+  border-radius: 14px;
+  padding: 16px;
+}
+
+.summary-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.summary-label {
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+.summary-value {
+  font-size: 22px;
+  font-variant-numeric: tabular-nums;
+}
+
+.summary-count {
+  margin-left: 6px;
+  font-size: 12px;
+  font-weight: 400;
+  opacity: 0.85;
+}
+
+/* 两级分类选择 */
+.category-field {
+  border: 0;
+  padding: 0;
+  margin: 0 0 14px;
+}
+
+.category-field legend {
+  padding: 0;
+  margin-bottom: 6px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chip-row-child {
+  margin-top: 8px;
+}
+
+.chip {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.chip-active {
+  border-color: var(--brand);
+  background: var(--brand-dim);
+  color: var(--brand);
+  font-weight: 600;
+}
+
+.amount-field input {
+  font-size: 24px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.form-success {
+  color: var(--brand);
+  font-size: 13px;
+  margin: 0 0 12px;
+}
+
+/* 最近记录 */
+.recent-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.recent-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+}
+
+.recent-item:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.recent-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.recent-category {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.recent-meta {
+  font-size: 12px;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent-amount {
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
 }

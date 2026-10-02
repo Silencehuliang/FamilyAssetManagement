@@ -50,6 +50,14 @@ export function requireString(value: unknown, field: string): string {
   return value.trim()
 }
 
+/** 同 requireString,但保留原始内容(不 trim):用于文件内容等对末尾空白敏感的场景 */
+export function requireRawString(value: unknown, field: string): string {
+  if (typeof value !== 'string' || value.trim() === '') {
+    throw new HttpError(400, 'invalid_request', `${field} 不能为空`)
+  }
+  return value
+}
+
 export function optionalString(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined
 }

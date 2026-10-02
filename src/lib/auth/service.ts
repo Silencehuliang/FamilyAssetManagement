@@ -56,6 +56,14 @@ async function saveMembers(deps: AuthDeps, members: MemberRecord[], sha: string)
   await deps.store.putFile(MEMBERS_FILE, serializeMembers(members), sha)
 }
 
+/**
+ * 账本是否已初始化(仓库中是否已存在 members.json)。
+ * 供未携带会话的初始化探测使用:未初始化 → 初始化向导,已初始化 → 登录页。
+ */
+export async function isInitialized(deps: AuthDeps): Promise<boolean> {
+  return (await deps.store.getFile(MEMBERS_FILE)) !== null
+}
+
 export interface AuthResult {
   token: string
   member: Member

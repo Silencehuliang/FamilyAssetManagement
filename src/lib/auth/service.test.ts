@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { LedgerStore, RepoFile } from '../github'
+import type { LedgerStore, RepoDirEntry, RepoFile } from '../github'
 import { HttpError } from '../http'
 import { verifyJwt } from './jwt'
 import {
@@ -36,6 +36,25 @@ class MemoryStore implements LedgerStore {
     const newSha = `sha:${path}#${this.writes.length}`
     this.files.set(path, { content, sha: newSha })
     return Promise.resolve(newSha)
+  }
+
+  listDirectory(path: string): Promise<RepoDirEntry[]> {
+    const prefix = `${path}/`
+    return Promise.resolve(
+      [...this.files.entries()]
+        .filter(([filePath]) => filePath.startsWith(prefix))
+        .map(([filePath, file]) => ({
+          name: filePath.slice(prefix.length),
+          path: filePath,
+          sha: file.sha,
+          type: 'file',
+        })),
+    )
+  }
+
+  deleteFile(path: string): Promise<void> {
+    this.files.delete(path)
+    return Promise.resolve()
   }
 }
 

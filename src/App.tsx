@@ -1,5 +1,14 @@
-import { type ReactNode, useState } from 'react'
+import { type ReactNode, useEffect, useState } from 'react'
+import { SyncBadge } from './components/SyncBadge'
 import { TabIcon } from './components/TabIcon'
+import { AddExpensePage } from './pages/AddExpensePage'
+import { LoginPage } from './pages/LoginPage'
+import { MePage } from './pages/MePage'
+import { PlaceholderPage } from './pages/PlaceholderPage'
+import { SetupPage } from './pages/SetupPage'
+import type { AppState } from './state/app-controller'
+import { appController } from './state/runtime'
+import { useAppState } from './state/use-app'
 
 type TabKey = 'add' | 'entries' | 'stats' | 'budget' | 'me'
 
@@ -7,7 +16,6 @@ interface Tab {
   key: TabKey
   label: string
   icon: ReactNode
-  placeholder: string
 }
 
 const TABS: Tab[] = [
@@ -20,7 +28,6 @@ const TABS: Tab[] = [
         <path d="M12 8v8M8 12h8" />
       </TabIcon>
     ),
-    placeholder: '记一笔 · T6 交付',
   },
   {
     key: 'entries',
@@ -30,7 +37,6 @@ const TABS: Tab[] = [
         <path d="M4 6h16M4 12h16M4 18h10" />
       </TabIcon>
     ),
-    placeholder: '支出明细 · T7 交付',
   },
   {
     key: 'stats',
@@ -40,7 +46,6 @@ const TABS: Tab[] = [
         <path d="M5 20V10M12 20V4M19 20v-7" />
       </TabIcon>
     ),
-    placeholder: '统计报表 · T10 交付',
   },
   {
     key: 'budget',
@@ -51,7 +56,6 @@ const TABS: Tab[] = [
         <path d="M12 12V6.5A5.5 5.5 0 0 1 17.5 12H12Z" />
       </TabIcon>
     ),
-    placeholder: '预算管理 · T11 交付',
   },
   {
     key: 'me',
@@ -62,24 +66,51 @@ const TABS: Tab[] = [
         <path d="M5 19c1.5-3.5 4-5 7-5s5.5 1.5 7 5" />
       </TabIcon>
     ),
-    placeholder: '设置与账户 · T5/T13 交付',
   },
 ]
 
 export default function App() {
+  const state = useAppState(appController)
+
+  useEffect(() => {
+    void appController.boot()
+    return appController.startConnectivityListeners()
+  }, [])
+
+  if (state.phase === 'booting') {
+    return (
+      <div className="app app-centered">
+        <p className="placeholder">正在打开账本…</p>
+      </div>
+    )
+  }
+
+  if (state.phase === 'setup') {
+    return <SetupPage controller={appController} state={state} />
+  }
+
+  if (state.phase === 'login') {
+    return <LoginPage controller={appController} state={state} />
+  }
+
+  return <Shell state={state} />
+}
+
+function Shell({ state }: { state: AppState }) {
   const [tab, setTab] = useState<TabKey>('add')
-  const current = TABS.find((t) => t.key === tab)
 
   return (
     <div className="app">
       <header className="app-header">
         <h1>家庭记账</h1>
-        <span className="sync-badge" data-state="offline">
-          未接入同步
-        </span>
+        <SyncBadge status={state.syncStatus} />
       </header>
       <main className="app-main">
-        <p className="placeholder">{current?.placeholder}</p>
+        {tab === 'add' ? <AddExpensePage controller={appController} state={state} /> : null}
+        {tab === 'entries' ? <PlaceholderPage title="支出明细" note="T7 交付" /> : null}
+        {tab === 'stats' ? <PlaceholderPage title="统计报表" note="T10 交付" /> : null}
+        {tab === 'budget' ? <PlaceholderPage title="预算管理" note="T11 交付" /> : null}
+        {tab === 'me' ? <MePage controller={appController} state={state} /> : null}
       </main>
       <nav className="tab-bar">
         {TABS.map((t) => (
