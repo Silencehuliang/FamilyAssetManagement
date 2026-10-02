@@ -63,20 +63,23 @@ function insideRounded(x, y, size, radius) {
   return dx * dx + dy * dy <= radius * radius
 }
 
-function render(size) {
+function render(size, inset = 1) {
   const rgba = Buffer.alloc(size * size * 4)
   const scale = size / 512
   const radius = Math.round(90 * scale)
   // White "ledger page" band with a green rule line, drawn in icon space.
+  // `inset` shrinks the mark toward the center: maskable icons need a
+  // safe zone so circular masks never clip the artwork.
+  const C = 256 * scale
   const band = {
-    x0: Math.round(120 * scale),
-    y0: Math.round(150 * scale),
-    x1: Math.round(392 * scale),
-    y1: Math.round(382 * scale),
-    r: Math.round(28 * scale),
-    ruleTop: Math.round(244 * scale),
-    ruleBottom: Math.round(258 * scale),
+    x0: Math.round(C + (120 * scale - C) * inset),
+    y0: Math.round(C + (150 * scale - C) * inset),
+    x1: Math.round(C + (392 * scale - C) * inset),
+    y1: Math.round(C + (382 * scale - C) * inset),
+    r: Math.round(28 * scale * inset),
   }
+  band.ruleTop = Math.round(C + (244 * scale - C) * inset)
+  band.ruleBottom = Math.round(C + (258 * scale - C) * inset)
   const inBand = (x, y) =>
     x >= band.x0 &&
     x <= band.x1 &&
@@ -100,15 +103,15 @@ function render(size) {
 }
 
 const targets = [
-  ['pwa-192.png', 192],
-  ['pwa-512.png', 512],
-  ['pwa-maskable-512.png', 512],
-  ['apple-touch-icon.png', 180],
+  ['pwa-192.png', 192, 1],
+  ['pwa-512.png', 512, 1],
+  ['pwa-maskable-512.png', 512, 0.78],
+  ['apple-touch-icon.png', 180, 1],
 ]
 
 mkdirSync(outDir, { recursive: true })
-for (const [name, size] of targets) {
-  writeFileSync(join(outDir, name), encodePng(size, render(size)))
+for (const [name, size, inset] of targets) {
+  writeFileSync(join(outDir, name), encodePng(size, render(size, inset)))
   console.log(`wrote public/${name} (${size}x${size})`)
 }
 
