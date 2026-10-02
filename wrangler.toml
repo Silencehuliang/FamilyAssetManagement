@@ -1,0 +1,7 @@
+name = "family-ledger"
+compatibility_date = "2026-09-01"
+pages_build_output_dir = "dist"
+
+[vars]
+# 与 package.json 的 version 保持一致
+APP_VERSION = "0.1.0"

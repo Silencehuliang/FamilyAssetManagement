@@ -1,0 +1,4 @@
+# 复制为 .dev.vars 并填入真实值(wrangler pages dev 本地使用,已被 git 忽略)
+# GITHUB_TOKEN=
+# GITHUB_REPO=owner/repo
+# JWT_SECRET=
