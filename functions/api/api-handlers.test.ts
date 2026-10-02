@@ -11,6 +11,7 @@ import { createSession } from '../../src/lib/auth/session'
 import { onRequestPost as changePasswordPost } from './auth/password'
 import { onRequestGet as ledgerGet, onRequestPut as ledgerPut } from './ledger/file'
 import { onRequestPost as loginPost } from './login'
+import { onRequestGet as membersGet } from './members'
 import { onRequestPost as resetPasswordPost } from './members/password'
 import { onRequestPost as setupPost } from './setup'
 
@@ -384,7 +385,7 @@ describe('PUT /api/ledger/file', () => {
     })
 
     expect(response.status).toBe(403)
-    expect(await jsonOf(response)).toMatchObject({ error: 'forbidden' })
+    expect(await jsonOf(response)).toMatchObject({ error: 'members_server_owned' })
     expect(stub.requests).not.toContainEqual({ method: 'PUT', path: MEMBERS_FILE })
   })
 
@@ -405,5 +406,30 @@ describe('PUT /api/ledger/file', () => {
     expect(response.status).toBe(200)
     expect(await jsonOf(response)).toMatchObject({ sha: 'new-sha-1' })
     expect(stub.files.get(MONTH_FILE)).toBe('{"expenses":[]}')
+  })
+})
+
+describe('GET /api/members', () => {
+  it('返回去凭据的成员列表;未认证 401', async () => {
+    const ada = await seededMember('ada', 'ada-pw-123')
+    stub = githubStub({ [MEMBERS_FILE]: serializeMembers([ada]) })
+    vi.stubGlobal('fetch', stub.impl)
+    const token = await createSession(ada, ENV.JWT_SECRET)
+
+    const ok = await membersGet({
+      request: new Request(`${BASE}/api/members`, {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      env: ENV,
+    })
+    const body = (await ok.json()) as { members: Array<Record<string, unknown>> }
+    expect(ok.status).toBe(200)
+    expect(body.members).toHaveLength(1)
+    expect(body.members[0]).toMatchObject({ username: 'ada' })
+    expect(JSON.stringify(body)).not.toContain('passwordHash')
+    expect(JSON.stringify(body)).not.toContain('passwordSalt')
+
+    const denied = await membersGet({ request: new Request(`${BASE}/api/members`), env: ENV })
+    expect(denied.status).toBe(401)
   })
 })

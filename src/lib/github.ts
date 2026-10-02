@@ -3,6 +3,8 @@
  * 客户端永不接触 GITHUB_TOKEN —— 只在服务端使用。
  * fetch 可注入,便于契约测试 mock GitHub API。
  */
+
+import { base64ToBytes, bytesToBase64 } from './base64'
 import { HttpError } from './http'
 
 const API_ROOT = 'https://api.github.com'
@@ -49,24 +51,6 @@ function requestHeaders(token: string, extra?: HeadersInit): Headers {
   return headers
 }
 
-function base64ToUtf8(base64: string): string {
-  const binary = atob(base64.replaceAll(/\s/g, ''))
-  const bytes = new Uint8Array(binary.length)
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i)
-  }
-  return new TextDecoder().decode(bytes)
-}
-
-function utf8ToBase64(text: string): string {
-  const bytes = new TextEncoder().encode(text)
-  let binary = ''
-  for (const byte of bytes) {
-    binary += String.fromCharCode(byte)
-  }
-  return btoa(binary)
-}
-
 async function assertOk(response: Response, ignoreNotFound: boolean): Promise<void> {
   if (response.ok || (ignoreNotFound && response.status === 404)) {
     return
@@ -100,7 +84,7 @@ export async function getFile(
   ) {
     throw new HttpError(502, 'github_error', '不支持的 GitHub Contents 响应')
   }
-  return { content: base64ToUtf8(data.content), sha: data.sha }
+  return { content: new TextDecoder().decode(base64ToBytes(data.content)), sha: data.sha }
 }
 
 /** PUT /repos/{repo}/contents/{path};返回新 blob sha */
@@ -114,7 +98,7 @@ export async function putFile(
 ): Promise<string> {
   const body: Record<string, unknown> = {
     message: `chore(ledger): ${path}`,
-    content: utf8ToBase64(content),
+    content: bytesToBase64(new TextEncoder().encode(content)),
   }
   if (sha !== undefined) {
     body.sha = sha

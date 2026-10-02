@@ -11,6 +11,8 @@ export const MEMBERS_FILE = 'ledger/meta/members.json'
 
 export type MemberRecord = Member & PasswordCredential
 
+export type { PasswordCredential }
+
 export interface MembersFile {
   members: MemberRecord[]
 }

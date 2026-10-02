@@ -9,6 +9,7 @@ import { HttpError } from '../http'
 import {
   MEMBERS_FILE,
   type MemberRecord,
+  type PasswordCredential,
   parseMembers,
   serializeMembers,
   toPublicMember,
@@ -102,11 +103,15 @@ export interface LoginInput {
   password: string
 }
 
-/** 登录:未知用户/错密码一律 401 不泄露存在性;停用账户 401 */
+/** 登录:未知用户/错密码一律 401 不泄露存在性(未知用户也执行一次 PBKDF2 抹平时序);停用账户 401 */
 export async function login(deps: AuthDeps, input: LoginInput): Promise<AuthResult> {
   const { members } = await loadMembers(deps)
   const record = members.find((m) => m.username === input.username)
-  if (!record || !(await verifyPassword(input.password, record))) {
+  if (!record) {
+    await burnCredential(input.password)
+    throw new HttpError(401, 'invalid_credentials', '用户名或密码错误')
+  }
+  if (!(await verifyPassword(input.password, record))) {
     throw new HttpError(401, 'invalid_credentials', '用户名或密码错误')
   }
   if (record.disabled) {
@@ -114,6 +119,14 @@ export async function login(deps: AuthDeps, input: LoginInput): Promise<AuthResu
   }
   const member = toPublicMember(record)
   return { token: await createSession(record, deps.secret), member }
+}
+
+let burnCredentialPromise: Promise<PasswordCredential> | null = null
+
+/** 未知用户也做一次等价 PBKDF2,避免响应时序泄露用户名存在性 */
+async function burnCredential(password: string): Promise<boolean> {
+  burnCredentialPromise ??= hashPassword(crypto.randomUUID())
+  return verifyPassword(password, await burnCredentialPromise)
 }
 
 export interface ChangePasswordInput {
@@ -143,6 +156,12 @@ export async function changeOwnPassword(
 export interface ResetPasswordInput {
   memberId: string
   newPassword: string
+}
+
+/** 全员公开的成员列表(去凭据):供经手人选择、成员识别 */
+export async function listMembers(deps: AuthDeps): Promise<Member[]> {
+  const { members } = await loadMembers(deps)
+  return members.map(toPublicMember)
 }
 
 /** 管理员重置任意成员密码(角色门禁由 requireAdmin 在入口强制) */

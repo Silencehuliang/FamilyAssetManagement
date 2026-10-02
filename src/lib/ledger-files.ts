@@ -1,19 +1,17 @@
 /**
- * 账本文件读写代理(ADR-0002/0004/0005):
+ * 账本文件读写代理(ADR-0002/0004/0005/0006):
  * - 路径必须位于 ledger/ 之下,越界一律 400;
- * - 读取对所有已认证成员开放;
- * - 写入仅限:支出月度文件与周期规则(所有成员)、分类/预算/成员元数据(仅管理员)。
+ * - 读取对所有已认证成员开放,但 members.json 除外 —— 凭据永不过代理,
+ *   客户端经 GET /api/members 获取去凭据的成员列表;
+ * - 写入仅限:支出月度文件与周期规则(所有成员)、分类/预算/成员元数据(仅管理员);
+ * - members.json 双向皆由鉴权端点专属管理,代理一律 403。
  */
 import type { JwtPayload } from './auth/jwt'
-import { MEMBERS_FILE, parseMembers } from './auth/members'
+import { MEMBERS_FILE } from './auth/members'
 import type { LedgerStore } from './github'
 import { HttpError } from './http'
 
-const ADMIN_ONLY_FILES = new Set([
-  MEMBERS_FILE,
-  'ledger/meta/categories.json',
-  'ledger/meta/budgets.json',
-])
+const ADMIN_ONLY_FILES = new Set(['ledger/meta/categories.json', 'ledger/meta/budgets.json'])
 
 export function validateLedgerPath(path: unknown): string {
   if (
@@ -32,7 +30,11 @@ export async function readLedgerFile(
   store: LedgerStore,
   path: unknown,
 ): Promise<{ content: string; sha: string }> {
-  const file = await store.getFile(validateLedgerPath(path))
+  const validPath = validateLedgerPath(path)
+  if (validPath === MEMBERS_FILE) {
+    throw new HttpError(403, 'members_not_readable', '成员凭据文件不可读取,请使用 GET /api/members')
+  }
+  const file = await store.getFile(validPath)
   if (!file) {
     throw new HttpError(404, 'not_found', '账本文件不存在')
   }
@@ -51,15 +53,11 @@ export async function writeLedgerFile(
   input: WriteLedgerInput,
 ): Promise<{ sha: string }> {
   const path = validateLedgerPath(input.path)
+  if (path === MEMBERS_FILE) {
+    throw new HttpError(403, 'members_server_owned', 'members.json 由鉴权端点专属管理')
+  }
   if (ADMIN_ONLY_FILES.has(path) && session.role !== 'admin') {
     throw new HttpError(403, 'forbidden', '仅管理员可修改该元数据')
-  }
-  if (path === MEMBERS_FILE) {
-    try {
-      parseMembers(input.content)
-    } catch {
-      throw new HttpError(400, 'invalid_members', 'members.json 内容不合法,拒绝写入')
-    }
   }
   return { sha: await store.putFile(path, input.content, input.sha) }
 }

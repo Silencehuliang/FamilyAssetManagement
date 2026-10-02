@@ -3,6 +3,8 @@
  * 存储格式:pbkdf2$sha256$<iterations>$<saltBase64>$<hashBase64>,盐 ≥16 字节,迭代数 ≥100_000。
  * 仅依赖 crypto.subtle,可在 Node 与 Workers 中运行。
  */
+import { base64ToBytes, bytesToBase64 } from '../base64'
+
 export const PBKDF2_ITERATIONS = 100_000
 const SALT_BYTES = 16
 const HASH_BITS = 256
@@ -10,23 +12,6 @@ const HASH_BITS = 256
 export interface PasswordCredential {
   passwordHash: string
   passwordSalt: string
-}
-
-function bytesToBase64(bytes: Uint8Array): string {
-  let binary = ''
-  for (const byte of bytes) {
-    binary += String.fromCharCode(byte)
-  }
-  return btoa(binary)
-}
-
-function base64ToBytes(base64: string): Uint8Array {
-  const binary = atob(base64)
-  const bytes = new Uint8Array(binary.length)
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i)
-  }
-  return bytes
 }
 
 async function deriveBits(
