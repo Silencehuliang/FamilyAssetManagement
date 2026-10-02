@@ -1,8 +1,14 @@
 import type { AuthEnv } from '../../../src/lib/auth/service'
 import { createAuthDeps } from '../../../src/lib/auth/service'
 import { requireAuth } from '../../../src/lib/auth/session'
-import { handleApi, optionalString, readJsonBody, requireString } from '../../../src/lib/http'
-import { readLedgerFile, writeLedgerFile } from '../../../src/lib/ledger-files'
+import {
+  handleApi,
+  optionalString,
+  readJsonBody,
+  requireRawString,
+  requireString,
+} from '../../../src/lib/http'
+import { deleteLedgerFile, readLedgerFile, writeLedgerFile } from '../../../src/lib/ledger-files'
 
 /** GET /api/ledger/file?path=ledger/... —— 已认证成员读取账本文件 */
 export const onRequestGet = ({
@@ -20,7 +26,7 @@ export const onRequestGet = ({
   })
 }
 
-/** PUT /api/ledger/file —— 代理写入账本文件;members.json 仅限管理员 */
+/** PUT /api/ledger/file —— 代理写入账本文件;members.json 双向拒绝 */
 export const onRequestPut = ({
   request,
   env,
@@ -34,8 +40,28 @@ export const onRequestPut = ({
     const body = await readJsonBody(request)
     return writeLedgerFile(deps.store, session, {
       path: requireString(body.path, 'path'),
-      content: requireString(body.content, 'content'),
+      // 内容不 trim:账本 JSON 以 \n 结尾,原样写入才能保证同步幂等(git diff 友好)
+      content: requireRawString(body.content, 'content'),
       sha: optionalString(body.sha),
+    })
+  })
+}
+
+/** DELETE /api/ledger/file —— 删除支出月份文件(需携带当前 sha);其余路径 403 */
+export const onRequestDelete = ({
+  request,
+  env,
+}: {
+  request: Request
+  env: AuthEnv
+}): Promise<Response> => {
+  return handleApi(async () => {
+    const deps = createAuthDeps(env)
+    await requireAuth(request, deps.secret)
+    const body = await readJsonBody(request)
+    return deleteLedgerFile(deps.store, {
+      path: requireString(body.path, 'path'),
+      sha: requireString(body.sha, 'sha'),
     })
   })
 }

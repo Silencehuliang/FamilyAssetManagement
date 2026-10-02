@@ -1,8 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import type { JwtPayload } from './auth/jwt'
-import type { LedgerStore, RepoFile } from './github'
+import type { LedgerStore, RepoDirEntry, RepoFile } from './github'
 import { HttpError } from './http'
-import { readLedgerFile, validateLedgerPath, writeLedgerFile } from './ledger-files'
+import {
+  deleteLedgerFile,
+  listLedgerFiles,
+  readLedgerFile,
+  validateLedgerPath,
+  writeLedgerFile,
+} from './ledger-files'
 
 class MemoryStore implements LedgerStore {
   readonly files = new Map<string, RepoFile>()
@@ -24,6 +30,25 @@ class MemoryStore implements LedgerStore {
     const newSha = `sha:${path}#${this.writes.length}`
     this.files.set(path, { content, sha: newSha })
     return Promise.resolve(newSha)
+  }
+
+  listDirectory(path: string): Promise<RepoDirEntry[]> {
+    const prefix = `${path}/`
+    return Promise.resolve(
+      [...this.files.entries()]
+        .filter(([filePath]) => filePath.startsWith(prefix))
+        .map(([filePath, file]) => ({
+          name: filePath.slice(prefix.length),
+          path: filePath,
+          sha: file.sha,
+          type: 'file',
+        })),
+    )
+  }
+
+  deleteFile(path: string): Promise<void> {
+    this.files.delete(path)
+    return Promise.resolve()
   }
 }
 
@@ -146,5 +171,64 @@ describe('元数据写入的角色矩阵', () => {
         content: '{"expenses":[]}',
       }),
     ).resolves.toMatchObject({ sha: expect.any(String) })
+  })
+})
+
+describe('listLedgerFiles(同步清单)', () => {
+  it('列出月份文件与三个 meta 文件,members.json 永不包含', async () => {
+    const store = new MemoryStore({
+      'ledger/months/2026-10.json': '{"expenses":[]}',
+      'ledger/months/2026-09.json': '{"expenses":[{"id":"e-1"}]}',
+      'ledger/meta/categories.json': '{"categories":[]}',
+      'ledger/meta/budgets.json': '{"budgets":{}}',
+      'ledger/meta/recurring.json': '{"recurring":[]}',
+      'ledger/meta/members.json': '{"members":[]}',
+      'README.md': 'not ledger',
+    })
+
+    const files = await listLedgerFiles(store)
+
+    expect(Object.keys(files).sort()).toEqual([
+      'ledger/meta/budgets.json',
+      'ledger/meta/categories.json',
+      'ledger/meta/recurring.json',
+      'ledger/months/2026-09.json',
+      'ledger/months/2026-10.json',
+    ])
+    expect(files['ledger/months/2026-10.json']).toEqual({
+      content: '{"expenses":[]}',
+      revision: 'sha:ledger/months/2026-10.json',
+    })
+  })
+
+  it('缺失的 meta 文件省略,months 目录不存在时只有 meta 文件', async () => {
+    const store = new MemoryStore({ 'ledger/meta/categories.json': '{"categories":[]}' })
+    const files = await listLedgerFiles(store)
+    expect(Object.keys(files)).toEqual(['ledger/meta/categories.json'])
+  })
+})
+
+describe('deleteLedgerFile(删除月份文件)', () => {
+  it('删除月份文件成功', async () => {
+    const store = new MemoryStore({ 'ledger/months/2026-10.json': '{"expenses":[]}' })
+    await expect(
+      deleteLedgerFile(store, { path: 'ledger/months/2026-10.json', sha: 'sha:known' }),
+    ).resolves.toEqual({ deleted: true })
+    expect(store.files.has('ledger/months/2026-10.json')).toBe(false)
+  })
+
+  it('meta 文件与非法路径拒绝删除(403/400)', async () => {
+    const store = new MemoryStore({ 'ledger/meta/categories.json': '{"categories":[]}' })
+    await expect(
+      deleteLedgerFile(store, { path: 'ledger/meta/categories.json', sha: 'sha:known' }),
+    ).rejects.toMatchObject({ status: 403, code: 'not_deletable' })
+    await expect(
+      deleteLedgerFile(store, { path: 'ledger/meta/members.json', sha: 'sha:known' }),
+    ).rejects.toMatchObject({ status: 403, code: 'not_deletable' })
+    await expect(deleteLedgerFile(store, { path: 'README.md', sha: 's' })).rejects.toMatchObject({
+      status: 400,
+      code: 'invalid_path',
+    })
+    expect(store.files.size).toBe(1)
   })
 })

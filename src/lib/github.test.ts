@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createLedgerStore, getFile, putFile } from './github'
+import { createLedgerStore, deleteFile, getFile, listDirectory, putFile } from './github'
 
 function decodeBase64Utf8(base64: string): string {
   const binary = atob(base64)
@@ -145,5 +145,63 @@ describe('createLedgerStore', () => {
     expect(stub.files.get('/repos/family/ledger/contents/ledger/a.json')).toBe(
       encodeBase64Utf8('B'),
     )
+  })
+})
+
+describe('listDirectory', () => {
+  it('目录响应数组映射为条目;请求带鉴权头', async () => {
+    const seen: { method: string; url: string }[] = []
+    const impl = (input: string, init?: RequestInit): Promise<Response> => {
+      seen.push({ method: init?.method ?? 'GET', url: input })
+      return Promise.resolve(
+        Response.json([
+          { name: '2026-10.json', path: 'ledger/months/2026-10.json', sha: 'blob-1', type: 'file' },
+          { name: 'sub', path: 'ledger/months/sub', sha: 'tree-1', type: 'dir' },
+        ]),
+      )
+    }
+
+    const entries = await listDirectory(REPO, TOKEN, 'ledger/months', impl)
+
+    expect(entries).toEqual([
+      { name: '2026-10.json', path: 'ledger/months/2026-10.json', sha: 'blob-1', type: 'file' },
+      { name: 'sub', path: 'ledger/months/sub', sha: 'tree-1', type: 'dir' },
+    ])
+    expect(seen[0]?.url).toBe('https://api.github.com/repos/family/ledger/contents/ledger/months')
+  })
+
+  it('404 返回空数组,响应不是数组时 502', async () => {
+    const notFound = (): Promise<Response> =>
+      Promise.resolve(Response.json({ message: 'Not Found' }, { status: 404 }))
+    await expect(listDirectory(REPO, TOKEN, 'ledger/months', notFound)).resolves.toEqual([])
+
+    const fileResponse = (): Promise<Response> =>
+      Promise.resolve(Response.json({ content: 'x', encoding: 'base64', sha: 's' }))
+    await expect(
+      listDirectory(REPO, TOKEN, 'ledger/months/2026-10.json', fileResponse),
+    ).rejects.toMatchObject({ status: 502, code: 'github_error' })
+  })
+})
+
+describe('deleteFile', () => {
+  it('DELETE 请求携带 sha 与提交信息', async () => {
+    let captured: { method: string; body: unknown } | undefined
+    const impl = (_input: string, init?: RequestInit): Promise<Response> => {
+      captured = { method: init?.method ?? 'GET', body: JSON.parse(String(init?.body)) }
+      return Promise.resolve(Response.json({ commit: { sha: 'commit-1' } }))
+    }
+
+    await deleteFile(REPO, TOKEN, 'ledger/months/2026-10.json', 'blob-1', impl)
+
+    expect(captured?.method).toBe('DELETE')
+    expect(captured?.body).toMatchObject({ sha: 'blob-1' })
+  })
+
+  it('422 映射为 409 file_conflict', async () => {
+    const conflict = (): Promise<Response> =>
+      Promise.resolve(Response.json({ message: 'Conflict' }, { status: 422 }))
+    await expect(
+      deleteFile(REPO, TOKEN, 'ledger/months/2026-10.json', 'stale', conflict),
+    ).rejects.toMatchObject({ status: 409, code: 'file_conflict' })
   })
 })

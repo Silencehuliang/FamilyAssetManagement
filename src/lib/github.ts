@@ -15,10 +15,20 @@ export interface RepoFile {
   sha: string
 }
 
+/** 仓库目录项(目录列表接口;type 为 'file' | 'dir' 等) */
+export interface RepoDirEntry {
+  name: string
+  path: string
+  sha: string
+  type: string
+}
+
 /** 仓库文件存取接口;服务层依赖它而非直接依赖 GitHub */
 export interface LedgerStore {
   getFile(path: string): Promise<RepoFile | null>
   putFile(path: string, content: string, sha?: string): Promise<string>
+  listDirectory(path: string): Promise<RepoDirEntry[]>
+  deleteFile(path: string, sha: string): Promise<void>
 }
 
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>
@@ -87,8 +97,7 @@ export async function getFile(
   return { content: new TextDecoder().decode(base64ToBytes(data.content)), sha: data.sha }
 }
 
-/** PUT /repos/{repo}/contents/{path};返回新 blob sha */
-export async function putFile(
+/** PUT /repos/{repo}/contents/{path};返回新 blob sha */ export async function putFile(
   repo: string,
   token: string,
   path: string,
@@ -121,11 +130,73 @@ export async function putFile(
   return newSha
 }
 
+interface DirEntryResponse {
+  name?: unknown
+  path?: unknown
+  sha?: unknown
+  type?: unknown
+}
+
+/**
+ * GET /repos/{repo}/contents/{path} 的目录形态;目录不存在返回空数组。
+ * 响应是数组而非对象时即为目录列表。
+ */
+export async function listDirectory(
+  repo: string,
+  token: string,
+  path: string,
+  fetchImpl: FetchLike = defaultFetch,
+): Promise<RepoDirEntry[]> {
+  const response = await fetchImpl(contentsUrl(repo, path), { headers: requestHeaders(token) })
+  await assertOk(response, true)
+  if (response.status === 404) {
+    return []
+  }
+  const data = (await response.json()) as unknown
+  if (!Array.isArray(data)) {
+    throw new HttpError(502, 'github_error', 'GitHub Contents 响应不是目录列表')
+  }
+  const entries: RepoDirEntry[] = []
+  for (const item of data as DirEntryResponse[]) {
+    if (
+      typeof item.name === 'string' &&
+      typeof item.path === 'string' &&
+      typeof item.sha === 'string' &&
+      typeof item.type === 'string'
+    ) {
+      entries.push({ name: item.name, path: item.path, sha: item.sha, type: item.type })
+    }
+  }
+  return entries
+}
+
+/** DELETE /repos/{repo}/contents/{path};sha 为删除目标的当前 blob sha(乐观并发) */
+export async function deleteFile(
+  repo: string,
+  token: string,
+  path: string,
+  sha: string,
+  fetchImpl: FetchLike = defaultFetch,
+): Promise<void> {
+  const response = await fetchImpl(contentsUrl(repo, path), {
+    method: 'DELETE',
+    headers: requestHeaders(token, { 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ message: `chore(ledger): delete ${path}`, sha }),
+  })
+  // 422 = sha 过期或文件已不存在(乐观并发冲突)
+  if (response.status === 422) {
+    throw new HttpError(409, 'file_conflict', '远端文件状态已变化,请刷新后重试')
+  }
+  await assertOk(response, false)
+}
+
 /** 组装仓库客户端;供 Pages Function 与服务层使用 */
 export function createLedgerStore(options: GithubClientOptions): LedgerStore {
   const { repo, token, fetchImpl = defaultFetch } = options
   return {
     getFile: (path) => getFile(repo, token, path, fetchImpl),
     putFile: (path, content, sha) => putFile(repo, token, path, content, sha, fetchImpl),
+    listDirectory: (path) => listDirectory(repo, token, path, fetchImpl),
+    deleteFile: (path, sha) => deleteFile(repo, token, path, sha, fetchImpl),
   }
 }

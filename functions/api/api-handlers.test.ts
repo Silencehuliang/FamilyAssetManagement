@@ -9,7 +9,12 @@ import {
 import { hashPassword } from '../../src/lib/auth/password'
 import { createSession } from '../../src/lib/auth/session'
 import { onRequestPost as changePasswordPost } from './auth/password'
-import { onRequestGet as ledgerGet, onRequestPut as ledgerPut } from './ledger/file'
+import {
+  onRequestDelete as ledgerDelete,
+  onRequestGet as ledgerGet,
+  onRequestPut as ledgerPut,
+} from './ledger/file'
+import { onRequestGet as ledgerListGet } from './ledger/list'
 import { onRequestPost as loginPost } from './login'
 import { onRequestGet as membersGet } from './members'
 import { onRequestPost as resetPasswordPost } from './members/password'
@@ -31,6 +36,8 @@ interface StubRequest {
 /** 模拟 GitHub Contents API,按账本路径存取文件 */
 function githubStub(initial: Record<string, string> = {}) {
   const files = new Map(Object.entries(initial))
+  const shas = new Map<string, string>()
+  for (const path of files.keys()) shas.set(path, `sha:${path}`)
   const requests: StubRequest[] = []
   let counter = 0
 
@@ -74,16 +81,42 @@ function githubStub(initial: Record<string, string> = {}) {
       const payload = JSON.parse(String(init?.body)) as { content: string }
       const content = decodeBase64Utf8(payload.content)
       files.set(path, content)
-      return Promise.resolve(
-        Response.json({ content: { sha: `new-sha-${++counter}` } }, { status: 201 }),
-      )
+      const sha = `new-sha-${++counter}`
+      shas.set(path, sha)
+      return Promise.resolve(Response.json({ content: { sha } }, { status: 201 }))
+    }
+    if (method === 'DELETE') {
+      const payload = JSON.parse(String(init?.body)) as { sha?: string }
+      if (!files.has(path) || payload.sha !== shas.get(path)) {
+        return Promise.resolve(Response.json({ message: 'Conflict' }, { status: 422 }))
+      }
+      files.delete(path)
+      shas.delete(path)
+      return Promise.resolve(Response.json({ commit: { sha: `del-sha-${++counter}` } }))
     }
     const content = files.get(path)
     if (content === undefined) {
+      // 目录形态:路径下存在文件时返回目录列表
+      const prefix = `${path}/`
+      const entries = [...files.keys()]
+        .filter((filePath) => filePath.startsWith(prefix))
+        .map((filePath) => ({
+          name: filePath.slice(prefix.length),
+          path: filePath,
+          sha: shas.get(filePath),
+          type: 'file',
+        }))
+      if (entries.length > 0) {
+        return Promise.resolve(Response.json(entries))
+      }
       return Promise.resolve(Response.json({ message: 'Not Found' }, { status: 404 }))
     }
     return Promise.resolve(
-      Response.json({ content: encodeBase64Utf8(content), encoding: 'base64', sha: `sha:${path}` }),
+      Response.json({
+        content: encodeBase64Utf8(content),
+        encoding: 'base64',
+        sha: shas.get(path),
+      }),
     )
   }
   return { impl, requests, files, encodeBase64Utf8 }
@@ -431,5 +464,141 @@ describe('GET /api/members', () => {
 
     const denied = await membersGet({ request: new Request(`${BASE}/api/members`), env: ENV })
     expect(denied.status).toBe(401)
+  })
+
+  it('未认证探测:仓库无 members.json 返回 500 members_file_missing(未初始化)', async () => {
+    stub = githubStub()
+    vi.stubGlobal('fetch', stub.impl)
+
+    const response = await membersGet({ request: new Request(`${BASE}/api/members`), env: ENV })
+
+    expect(response.status).toBe(500)
+    expect(await jsonOf(response)).toMatchObject({ error: 'members_file_missing' })
+  })
+})
+
+describe('GET /api/ledger/list', () => {
+  const MONTH_FILE = 'ledger/months/2026-10.json'
+  const CATEGORIES = 'ledger/meta/categories.json'
+  const BUDGETS = 'ledger/meta/budgets.json'
+  const RECURRING = 'ledger/meta/recurring.json'
+
+  it('返回月份文件与三个 meta 文件;members.json 永不包含', async () => {
+    const member = await seededMember('xiaohong', 'pw-123456')
+    stub = githubStub({
+      [MONTH_FILE]: '{\n  "expenses": []\n}\n',
+      [CATEGORIES]: '{\n  "categories": []\n}\n',
+      [BUDGETS]: '{\n  "budgets": {}\n}\n',
+      [RECURRING]: '{\n  "recurring": []\n}\n',
+      [MEMBERS_FILE]: serializeMembers([member]),
+    })
+    vi.stubGlobal('fetch', stub.impl)
+    const token = await createSession(member, ENV.JWT_SECRET)
+
+    const response = await ledgerListGet({
+      request: new Request(`${BASE}/api/ledger/list`, {
+        headers: { authorization: `Bearer ${token}` },
+      }),
+      env: ENV,
+    })
+
+    expect(response.status).toBe(200)
+    const body = (await response.json()) as {
+      files: Record<string, { content: string; revision: string }>
+    }
+    expect(Object.keys(body.files).sort()).toEqual([BUDGETS, CATEGORIES, RECURRING, MONTH_FILE])
+    expect(body.files[MONTH_FILE]).toEqual({
+      content: '{\n  "expenses": []\n}\n',
+      revision: `sha:${MONTH_FILE}`,
+    })
+    expect(body.files[MEMBERS_FILE]).toBeUndefined()
+    expect(stub.requests).toContainEqual({ method: 'GET', path: 'ledger/months' })
+    expect(stub.requests).not.toContainEqual({ method: 'GET', path: MEMBERS_FILE })
+  })
+
+  it('未认证返回 401', async () => {
+    stub = githubStub()
+    vi.stubGlobal('fetch', stub.impl)
+
+    const response = await ledgerListGet({
+      request: new Request(`${BASE}/api/ledger/list`),
+      env: ENV,
+    })
+
+    expect(response.status).toBe(401)
+    expect(await jsonOf(response)).toMatchObject({ error: 'unauthorized' })
+  })
+})
+
+describe('DELETE /api/ledger/file', () => {
+  const MONTH_FILE = 'ledger/months/2026-10.json'
+
+  it('成员凭当前 sha 删除月份文件', async () => {
+    const member = await seededMember('xiaohong', 'pw-123456')
+    stub = githubStub({ [MONTH_FILE]: '{"expenses":[]}' })
+    vi.stubGlobal('fetch', stub.impl)
+    const token = await createSession(member, ENV.JWT_SECRET)
+
+    const response = await ledgerDelete({
+      request: new Request(`${BASE}/api/ledger/file`, {
+        method: 'DELETE',
+        headers: { authorization: `Bearer ${token}` },
+        body: JSON.stringify({ path: MONTH_FILE, sha: `sha:${MONTH_FILE}` }),
+      }),
+      env: ENV,
+    })
+
+    expect(response.status).toBe(200)
+    expect(await jsonOf(response)).toEqual({ deleted: true })
+    expect(stub.files.has(MONTH_FILE)).toBe(false)
+    expect(stub.requests).toContainEqual({ method: 'DELETE', path: MONTH_FILE })
+  })
+
+  it('meta 文件不可删除(403),缺 sha 返回 400', async () => {
+    const member = await seededMember('xiaohong', 'pw-123456')
+    stub = githubStub({ [MEMBERS_FILE]: serializeMembers([member]) })
+    vi.stubGlobal('fetch', stub.impl)
+    const token = await createSession(member, ENV.JWT_SECRET)
+
+    const meta = await ledgerDelete({
+      request: new Request(`${BASE}/api/ledger/file`, {
+        method: 'DELETE',
+        headers: { authorization: `Bearer ${token}` },
+        body: JSON.stringify({ path: 'ledger/meta/categories.json', sha: 'sha:x' }),
+      }),
+      env: ENV,
+    })
+    expect(meta.status).toBe(403)
+    expect(await jsonOf(meta)).toMatchObject({ error: 'not_deletable' })
+
+    const noSha = await ledgerDelete({
+      request: new Request(`${BASE}/api/ledger/file`, {
+        method: 'DELETE',
+        headers: { authorization: `Bearer ${token}` },
+        body: JSON.stringify({ path: MONTH_FILE }),
+      }),
+      env: ENV,
+    })
+    expect(noSha.status).toBe(400)
+    expect(await jsonOf(noSha)).toMatchObject({ error: 'invalid_request' })
+  })
+
+  it('sha 过期时 GitHub 422 映射为 409 file_conflict', async () => {
+    const member = await seededMember('xiaohong', 'pw-123456')
+    stub = githubStub({ [MONTH_FILE]: '{"expenses":[]}' })
+    vi.stubGlobal('fetch', stub.impl)
+    const token = await createSession(member, ENV.JWT_SECRET)
+
+    const response = await ledgerDelete({
+      request: new Request(`${BASE}/api/ledger/file`, {
+        method: 'DELETE',
+        headers: { authorization: `Bearer ${token}` },
+        body: JSON.stringify({ path: MONTH_FILE, sha: 'sha-stale' }),
+      }),
+      env: ENV,
+    })
+
+    expect(response.status).toBe(409)
+    expect(await jsonOf(response)).toMatchObject({ error: 'file_conflict' })
   })
 })
