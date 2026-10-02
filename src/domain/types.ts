@@ -55,12 +55,15 @@ export interface RecurringExpense {
   amountCents: number
   categoryId: CategoryId
   tagNames: string[]
+  /** 经手人(补记的支出归属该成员) */
   memberId: MemberId
   note?: string
   frequency: Frequency
   startDate: DateKey
   endDate?: DateKey
   enabled: boolean
+  /** 规则创建者(成员可维护自己的规则;旧数据缺省时以 memberId 兜底) */
+  createdBy?: MemberId
   createdAt: string
   updatedAt: string
 }

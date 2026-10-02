@@ -8,6 +8,7 @@ import { EntriesPage } from './pages/EntriesPage'
 import { LoginPage } from './pages/LoginPage'
 import { MembersPage } from './pages/MembersPage'
 import { MePage } from './pages/MePage'
+import { RecurringPage } from './pages/RecurringPage'
 import { SetupPage } from './pages/SetupPage'
 import { StatsPage } from './pages/StatsPage'
 import type { AppState } from './state/app-controller'
@@ -102,7 +103,7 @@ export default function App() {
 
 function Shell({ state }: { state: AppState }) {
   const [tab, setTab] = useState<TabKey>('add')
-  const [view, setView] = useState<'categories' | 'members' | null>(null)
+  const [view, setView] = useState<'categories' | 'members' | 'recurring' | null>(null)
 
   const openTab = (key: TabKey): void => {
     setTab(key)
@@ -122,6 +123,9 @@ function Shell({ state }: { state: AppState }) {
         {view === 'members' ? (
           <MembersPage controller={appController} state={state} onBack={() => setView(null)} />
         ) : null}
+        {view === 'recurring' ? (
+          <RecurringPage controller={appController} state={state} onBack={() => setView(null)} />
+        ) : null}
         {view === null ? (
           <>
             {tab === 'add' ? <AddExpensePage controller={appController} state={state} /> : null}
@@ -134,6 +138,7 @@ function Shell({ state }: { state: AppState }) {
                 state={state}
                 onOpenCategories={() => setView('categories')}
                 onOpenMembers={() => setView('members')}
+                onOpenRecurring={() => setView('recurring')}
               />
             ) : null}
           </>

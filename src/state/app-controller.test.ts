@@ -10,7 +10,7 @@ import type {
 } from '../api'
 import { ApiError } from '../api/client'
 import { addExpense, type Member } from '../domain'
-import { ADMIN, NOW, XIAOHONG } from '../domain/fixtures'
+import { ADMIN, fixtureLedger, LUNCH_CATEGORY, NOW, XIAOHONG } from '../domain/fixtures'
 import { MemoryLocalStore } from '../storage'
 import { InMemoryEndpoint } from '../sync'
 import { type AppApi, AppController } from './app-controller'
@@ -145,6 +145,7 @@ function makeController(options: {
   isOnline?: () => boolean
   now?: () => Date
   newId?: () => string
+  today?: () => string
 }) {
   const store = options.store ?? new MemoryLocalStore()
   const endpoint = new InMemoryEndpoint()
@@ -155,6 +156,7 @@ function makeController(options: {
     isOnline: options.isOnline,
     now: options.now,
     newId: options.newId,
+    today: options.today,
   })
   return { controller, store, endpoint }
 }
@@ -689,6 +691,137 @@ describe('AppController 预算(T11)', () => {
     await expect(
       controller.setBudget('2026-10', { categoryId: 'cat-dining', categoryCents: 100 }),
     ).rejects.toMatchObject({ code: 'category_not_leaf' })
+  })
+})
+
+describe('AppController 周期支出(T12)', () => {
+  async function readyController(actor: Member = ADMIN, newId?: () => string) {
+    const api = new FakeApi()
+    api.session = sessionOf(actor)
+    api.members = [ADMIN, XIAOHONG]
+    const made = makeController({
+      api,
+      now: () => new Date('2026-10-02T08:30:00.000Z'),
+      today: () => '2026-10-02',
+      newId,
+    })
+    await made.controller.boot()
+    return made
+  }
+
+  it('创建规则后自动补记错过的期次:确定性 id、幂等并推送到远端', async () => {
+    const { controller, store, endpoint } = await readyController(ADMIN, () => 'r-fixed')
+
+    const created = await controller.addRecurring({
+      amountCents: 300000,
+      categoryId: 'cat-housing-1',
+      frequency: 'monthly',
+      startDate: '2026-08-31',
+      note: '房租',
+    })
+    expect(created).toMatchObject({
+      id: 'r-fixed',
+      memberId: ADMIN.id,
+      createdBy: ADMIN.id,
+      enabled: true,
+    })
+
+    await controller.retrySync()
+    const ledger = controller.getLedger()
+    expect(ledger.months['2026-08']?.expenses[0]).toMatchObject({
+      id: 'rec-r-fixed-2026-08-31',
+      amountCents: 300000,
+      note: '房租',
+      memberId: ADMIN.id,
+    })
+    expect(ledger.months['2026-09']?.expenses[0]?.id).toBe('rec-r-fixed-2026-09-30')
+    expect(ledger.months['2026-10']).toBeUndefined() // 10 月 31 日尚未到期
+
+    // 再同步一轮:幂等,不重复补记
+    await controller.retrySync()
+    expect(ledger.months['2026-08']?.expenses).toHaveLength(1)
+    expect(ledger.months['2026-09']?.expenses).toHaveLength(1)
+
+    const files = await endpoint.listFiles()
+    expect(files['ledger/meta/recurring.json']?.content).toContain('"r-fixed"')
+    expect(files['ledger/months/2026-08.json']?.content).toContain('rec-r-fixed-2026-08-31')
+    expect((await store.loadLedger())?.months['2026-08']?.expenses).toHaveLength(1)
+  })
+
+  it('打开应用即补记缓存账本中错过的期次(无需先手动同步)', async () => {
+    const api = new FakeApi()
+    api.session = sessionOf(ADMIN)
+    api.members = [ADMIN, XIAOHONG]
+    const store = new MemoryLocalStore()
+    const seed = fixtureLedger()
+    seed.meta.recurring = [
+      {
+        id: 'r-rent',
+        amountCents: 200000,
+        categoryId: LUNCH_CATEGORY,
+        tagNames: [],
+        memberId: ADMIN.id,
+        frequency: 'monthly',
+        startDate: '2026-09-01',
+        enabled: true,
+        createdBy: ADMIN.id,
+        createdAt: NOW,
+        updatedAt: NOW,
+      },
+    ]
+    await store.saveLedger(seed)
+    const { controller } = makeController({
+      api,
+      store,
+      now: () => new Date('2026-10-02T08:30:00.000Z'),
+      today: () => '2026-10-02',
+    })
+
+    await controller.boot()
+
+    expect(controller.getLedger().months['2026-09']?.expenses[0]?.id).toBe('rec-r-rent-2026-09-01')
+    expect(controller.getLedger().months['2026-10']?.expenses[0]?.id).toBe('rec-r-rent-2026-10-01')
+  })
+
+  it('删除规则登记 delete-recurring 墓碑;恢复联网后远端规则清空且队列回落', async () => {
+    const api = new FakeApi()
+    api.session = sessionOf(XIAOHONG)
+    api.members = [ADMIN, XIAOHONG]
+    let online = false
+    const store = new MemoryLocalStore()
+    await store.saveLedger(fixtureLedger())
+    const { controller, endpoint } = makeController({
+      api,
+      store,
+      isOnline: () => online,
+      now: () => new Date('2026-10-02T08:30:00.000Z'),
+      today: () => '2026-10-02',
+      newId: () => 'r-mine',
+    })
+    await controller.boot()
+
+    const created = await controller.addRecurring({
+      amountCents: 1000,
+      categoryId: 'cat-dining-2',
+      frequency: 'weekly',
+      startDate: '2026-10-01',
+    })
+    expect(created.createdBy).toBe(XIAOHONG.id)
+    await controller.updateRecurring('r-mine', { enabled: false })
+    expect(controller.getLedger().meta.recurring[0]?.enabled).toBe(false)
+
+    await controller.removeRecurring('r-mine')
+    expect(controller.getLedger().meta.recurring).toEqual([])
+    await expect(store.loadQueueOps()).resolves.toEqual([
+      { type: 'delete-recurring', id: 'r-mine', deletedAt: '2026-10-02T08:30:00.000Z' },
+    ])
+
+    online = true
+    await controller.retrySync()
+    expect((await endpoint.listFiles())['ledger/meta/recurring.json']?.content).toContain(
+      '"recurring": []',
+    )
+    await expect(store.loadQueueOps()).resolves.toEqual([])
   })
 })
 

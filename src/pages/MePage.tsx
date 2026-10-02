@@ -1,17 +1,19 @@
 import { SYNC_LABELS } from '../components/SyncBadge'
 import type { AppController, AppState } from '../state/app-controller'
 
-/** 我的:当前成员、角色、分类/成员管理入口、同步状态与手动重试、登出 */
+/** 我的:当前成员、角色、分类/成员/周期支出管理入口、同步状态与手动重试、登出 */
 export function MePage({
   controller,
   state,
   onOpenCategories,
   onOpenMembers,
+  onOpenRecurring,
 }: {
   controller: AppController
   state: AppState
   onOpenCategories: () => void
   onOpenMembers: () => void
+  onOpenRecurring: () => void
 }) {
   const member = state.member
   return (
@@ -26,6 +28,9 @@ export function MePage({
 
       <section className="card">
         <h2 className="card-title">账本设置</h2>
+        <button type="button" className="primary-button" onClick={onOpenRecurring}>
+          周期支出
+        </button>
         <button type="button" className="primary-button" onClick={onOpenCategories}>
           分类管理
         </button>

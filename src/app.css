@@ -956,3 +956,20 @@ body {
   padding: 0;
   cursor: pointer;
 }
+
+/* 周期支出(T12) */
+.recurring-main {
+  min-width: 0;
+}
+
+.recurring-amount {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.recurring-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
