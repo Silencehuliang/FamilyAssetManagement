@@ -7,6 +7,7 @@ import {
   serializeMembers,
 } from '../../src/lib/auth/members'
 import { hashPassword } from '../../src/lib/auth/password'
+import { clearMemberStatusCache } from '../../src/lib/auth/service'
 import { createSession } from '../../src/lib/auth/session'
 import { onRequestPost as changePasswordPost } from './auth/password'
 import {
@@ -16,8 +17,9 @@ import {
 } from './ledger/file'
 import { onRequestGet as ledgerListGet } from './ledger/list'
 import { onRequestPost as loginPost } from './login'
-import { onRequestGet as membersGet } from './members'
+import { onRequestGet as membersGet, onRequestPost as membersPost } from './members'
 import { onRequestPost as resetPasswordPost } from './members/password'
+import { onRequestPost as memberStatusPost } from './members/status'
 import { onRequestPost as setupPost } from './setup'
 
 const ENV = {
@@ -164,6 +166,8 @@ let stub: ReturnType<typeof githubStub>
 beforeEach(() => {
   stub = githubStub()
   vi.stubGlobal('fetch', stub.impl)
+  // 停用状态查询使用模块级短 TTL 缓存;测试间隔离,避免同 id 缓存串味
+  clearMemberStatusCache()
 })
 
 afterEach(() => {
@@ -356,12 +360,195 @@ describe('POST /api/members/password', () => {
   })
 })
 
+describe('POST /api/members(管理员建号,T9)', () => {
+  it('管理员创建成员并返回公开成员;新成员可登录', async () => {
+    const admin = await seededMember('ada', 'admin-pw-1', { role: 'admin', id: 'id-ada' })
+    stub = githubStub({ [MEMBERS_FILE]: serializeMembers([admin]) })
+    vi.stubGlobal('fetch', stub.impl)
+    const token = await createSession(admin, ENV.JWT_SECRET)
+
+    const response = await membersPost({
+      request: post(
+        '/api/members',
+        { username: 'xiaohong', displayName: '小红', password: 'pw-123456' },
+        token,
+      ),
+      env: ENV,
+    })
+
+    expect(response.status).toBe(200)
+    const body = await jsonOf(response)
+    expect(body.member).toMatchObject({
+      username: 'xiaohong',
+      displayName: '小红',
+      role: 'member',
+      disabled: false,
+    })
+    expect(JSON.stringify(body)).not.toContain('passwordHash')
+    expect(JSON.stringify(body)).not.toContain('passwordSalt')
+
+    const relogin = await loginPost({
+      request: post('/api/login', { username: 'xiaohong', password: 'pw-123456' }),
+      env: ENV,
+    })
+    expect(relogin.status).toBe(200)
+  })
+
+  it('用户名重复返回 409 member_duplicated,不产生第二次写入', async () => {
+    const admin = await seededMember('ada', 'admin-pw-1', { role: 'admin' })
+    stub = githubStub({ [MEMBERS_FILE]: serializeMembers([admin]) })
+    vi.stubGlobal('fetch', stub.impl)
+    const token = await createSession(admin, ENV.JWT_SECRET)
+
+    const response = await membersPost({
+      request: post(
+        '/api/members',
+        { username: 'ada', displayName: '重复', password: 'pw-123456' },
+        token,
+      ),
+      env: ENV,
+    })
+
+    expect(response.status).toBe(409)
+    expect(await jsonOf(response)).toMatchObject({ error: 'member_duplicated' })
+  })
+
+  it('普通成员调用返回 403;缺字段返回 400;非法 role 返回 400', async () => {
+    const member = await seededMember('xiaohong', 'pw-123456')
+    stub = githubStub({ [MEMBERS_FILE]: serializeMembers([member]) })
+    vi.stubGlobal('fetch', stub.impl)
+    const token = await createSession(member, ENV.JWT_SECRET)
+
+    const denied = await membersPost({
+      request: post(
+        '/api/members',
+        { username: 'dali', displayName: '大力', password: 'pw-123456' },
+        token,
+      ),
+      env: ENV,
+    })
+    expect(denied.status).toBe(403)
+    expect(await jsonOf(denied)).toMatchObject({ error: 'forbidden' })
+
+    const admin = await seededMember('ada', 'admin-pw-1', { role: 'admin' })
+    stub = githubStub({ [MEMBERS_FILE]: serializeMembers([admin]) })
+    vi.stubGlobal('fetch', stub.impl)
+    const adminToken = await createSession(admin, ENV.JWT_SECRET)
+
+    const missing = await membersPost({
+      request: post('/api/members', { username: 'dali' }, adminToken),
+      env: ENV,
+    })
+    expect(missing.status).toBe(400)
+
+    const badRole = await membersPost({
+      request: post(
+        '/api/members',
+        { username: 'dali', displayName: '大力', password: 'pw-123456', role: 'owner' },
+        adminToken,
+      ),
+      env: ENV,
+    })
+    expect(badRole.status).toBe(400)
+    expect(await jsonOf(badRole)).toMatchObject({ error: 'invalid_request' })
+  })
+})
+
+describe('POST /api/members/status(停用/启用,T9)', () => {
+  it('停用后成员已签发会话的请求立即被拒(401 account_disabled),启用后恢复', async () => {
+    const admin = await seededMember('ada', 'admin-pw-1', { role: 'admin', id: 'id-ada' })
+    const member = await seededMember('xiaohong', 'pw-123456', { id: 'id-xiaohong' })
+    stub = githubStub({ [MEMBERS_FILE]: serializeMembers([admin, member]) })
+    vi.stubGlobal('fetch', stub.impl)
+    const adminToken = await createSession(admin, ENV.JWT_SECRET)
+    const memberToken = await createSession(member, ENV.JWT_SECRET)
+
+    const before = await membersGet({
+      request: new Request(`${BASE}/api/members`, {
+        headers: { authorization: `Bearer ${memberToken}` },
+      }),
+      env: ENV,
+    })
+    expect(before.status).toBe(200)
+
+    const disabled = await memberStatusPost({
+      request: post('/api/members/status', { memberId: member.id, disabled: true }, adminToken),
+      env: ENV,
+    })
+    expect(disabled.status).toBe(200)
+    expect((await jsonOf(disabled)).member).toMatchObject({ id: member.id, disabled: true })
+
+    const denied = await membersGet({
+      request: new Request(`${BASE}/api/members`, {
+        headers: { authorization: `Bearer ${memberToken}` },
+      }),
+      env: ENV,
+    })
+    expect(denied.status).toBe(401)
+    expect(await jsonOf(denied)).toMatchObject({ error: 'account_disabled' })
+
+    const deniedSync = await ledgerListGet({
+      request: new Request(`${BASE}/api/ledger/list`, {
+        headers: { authorization: `Bearer ${memberToken}` },
+      }),
+      env: ENV,
+    })
+    expect(deniedSync.status).toBe(401)
+    expect(await jsonOf(deniedSync)).toMatchObject({ error: 'account_disabled' })
+
+    const enabled = await memberStatusPost({
+      request: post('/api/members/status', { memberId: member.id, disabled: false }, adminToken),
+      env: ENV,
+    })
+    expect(enabled.status).toBe(200)
+    const restored = await membersGet({
+      request: new Request(`${BASE}/api/members`, {
+        headers: { authorization: `Bearer ${memberToken}` },
+      }),
+      env: ENV,
+    })
+    expect(restored.status).toBe(200)
+  })
+
+  it('不能停用自己(400 cannot_disable_self);普通成员 403;成员不存在 404', async () => {
+    const admin = await seededMember('ada', 'admin-pw-1', { role: 'admin', id: 'id-ada' })
+    const member = await seededMember('xiaohong', 'pw-123456')
+    stub = githubStub({ [MEMBERS_FILE]: serializeMembers([admin, member]) })
+    vi.stubGlobal('fetch', stub.impl)
+    const adminToken = await createSession(admin, ENV.JWT_SECRET)
+    const memberToken = await createSession(member, ENV.JWT_SECRET)
+
+    const self = await memberStatusPost({
+      request: post('/api/members/status', { memberId: admin.id, disabled: true }, adminToken),
+      env: ENV,
+    })
+    expect(self.status).toBe(400)
+    expect(await jsonOf(self)).toMatchObject({ error: 'cannot_disable_self' })
+
+    const denied = await memberStatusPost({
+      request: post('/api/members/status', { memberId: admin.id, disabled: true }, memberToken),
+      env: ENV,
+    })
+    expect(denied.status).toBe(403)
+
+    const notFound = await memberStatusPost({
+      request: post('/api/members/status', { memberId: 'nobody', disabled: true }, adminToken),
+      env: ENV,
+    })
+    expect(notFound.status).toBe(404)
+    expect(await jsonOf(notFound)).toMatchObject({ error: 'member_not_found' })
+  })
+})
+
 describe('GET /api/ledger/file', () => {
   const MONTH_FILE = 'ledger/months/2026-10.json'
 
   it('已认证成员读取账本文件', async () => {
     const member = await seededMember('xiaohong', 'pw-123456')
-    stub = githubStub({ [MONTH_FILE]: '{"expenses":[]}' })
+    stub = githubStub({
+      [MONTH_FILE]: '{"expenses":[]}',
+      [MEMBERS_FILE]: serializeMembers([member]),
+    })
     vi.stubGlobal('fetch', stub.impl)
     const token = await createSession(member, ENV.JWT_SECRET)
 
@@ -387,7 +574,7 @@ describe('GET /api/ledger/file', () => {
 
   it('路径不在 ledger/ 下返回 400', async () => {
     const member = await seededMember('xiaohong', 'pw-123456')
-    stub = githubStub()
+    stub = githubStub({ [MEMBERS_FILE]: serializeMembers([member]) })
     vi.stubGlobal('fetch', stub.impl)
     const token = await createSession(member, ENV.JWT_SECRET)
 
@@ -424,7 +611,7 @@ describe('PUT /api/ledger/file', () => {
 
   it('管理员写月文件生效并返回新 sha', async () => {
     const admin = await seededMember('ada', 'admin-pw-1', { role: 'admin' })
-    stub = githubStub()
+    stub = githubStub({ [MEMBERS_FILE]: serializeMembers([admin]) })
     vi.stubGlobal('fetch', stub.impl)
     const token = await createSession(admin, ENV.JWT_SECRET)
 
@@ -513,7 +700,10 @@ describe('GET /api/ledger/list', () => {
     })
     expect(body.files[MEMBERS_FILE]).toBeUndefined()
     expect(stub.requests).toContainEqual({ method: 'GET', path: 'ledger/months' })
-    expect(stub.requests).not.toContainEqual({ method: 'GET', path: MEMBERS_FILE })
+    // 列表响应绝不含 members.json(服务端专管);auth 校验会单独读取该文件核对停用状态
+    expect(
+      stub.requests.filter((request) => request.method === 'PUT' || request.method === 'DELETE'),
+    ).toEqual([])
   })
 
   it('未认证返回 401', async () => {
@@ -535,7 +725,10 @@ describe('DELETE /api/ledger/file', () => {
 
   it('成员凭当前 sha 删除月份文件', async () => {
     const member = await seededMember('xiaohong', 'pw-123456')
-    stub = githubStub({ [MONTH_FILE]: '{"expenses":[]}' })
+    stub = githubStub({
+      [MONTH_FILE]: '{"expenses":[]}',
+      [MEMBERS_FILE]: serializeMembers([member]),
+    })
     vi.stubGlobal('fetch', stub.impl)
     const token = await createSession(member, ENV.JWT_SECRET)
 
@@ -585,7 +778,10 @@ describe('DELETE /api/ledger/file', () => {
 
   it('sha 过期时 GitHub 422 映射为 409 file_conflict', async () => {
     const member = await seededMember('xiaohong', 'pw-123456')
-    stub = githubStub({ [MONTH_FILE]: '{"expenses":[]}' })
+    stub = githubStub({
+      [MONTH_FILE]: '{"expenses":[]}',
+      [MEMBERS_FILE]: serializeMembers([member]),
+    })
     vi.stubGlobal('fetch', stub.impl)
     const token = await createSession(member, ENV.JWT_SECRET)
 

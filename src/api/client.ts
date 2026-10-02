@@ -5,7 +5,7 @@
  * - 任何 401 都清空本地会话并通知订阅者(界面回到登录页);
  * - fetch 可注入,便于测试;网络层失败映射为 code=network_error(供同步层判定离线)。
  */
-import type { Member } from '../domain'
+import type { Member, Role } from '../domain'
 import {
   clearStoredSession,
   defaultSessionStorage,
@@ -45,6 +45,24 @@ export interface LoginInput {
 
 export interface SetupInput extends LoginInput {
   displayName: string
+}
+
+/** 管理员建号输入(T9);role 缺省 member */
+export interface CreateMemberInput {
+  username: string
+  displayName: string
+  password: string
+  role?: Role
+}
+
+export interface SetMemberStatusInput {
+  memberId: string
+  disabled: boolean
+}
+
+export interface ResetPasswordInput {
+  memberId: string
+  newPassword: string
 }
 
 /** 服务端账本文件形态:revision 即 GitHub blob sha */
@@ -141,6 +159,33 @@ export class ApiClient implements LedgerApi {
   async getMembers(): Promise<Member[]> {
     const body = await this.request<{ members: Member[] }>('/api/members')
     return body.members
+  }
+
+  /** 管理员创建成员(T9);用户名重复时服务端返回 409 member_duplicated */
+  async createMember(input: CreateMemberInput): Promise<Member> {
+    const body = await this.request<{ member: Member }>('/api/members', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    })
+    return body.member
+  }
+
+  /** 管理员停用/启用成员;不能停用自己(服务端 400 cannot_disable_self) */
+  async setMemberStatus(input: SetMemberStatusInput): Promise<Member> {
+    const body = await this.request<{ member: Member }>('/api/members/status', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    })
+    return body.member
+  }
+
+  /** 管理员重置成员密码 */
+  async resetMemberPassword(input: ResetPasswordInput): Promise<Member> {
+    const body = await this.request<{ member: Member }>('/api/members/password', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    })
+    return body.member
   }
 
   async listLedgerFiles(): Promise<Record<string, LedgerFilePayload>> {

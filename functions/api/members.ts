@@ -1,7 +1,19 @@
 import type { AuthEnv } from '../../src/lib/auth/service'
-import { createAuthDeps, isInitialized, listMembers } from '../../src/lib/auth/service'
-import { requireAuth } from '../../src/lib/auth/session'
-import { HttpError, handleApi } from '../../src/lib/http'
+import {
+  createAuthDeps,
+  createMember,
+  isInitialized,
+  listMembers,
+  requireActiveAdmin,
+  requireActiveAuth,
+} from '../../src/lib/auth/service'
+import {
+  HttpError,
+  handleApi,
+  optionalString,
+  readJsonBody,
+  requireString,
+} from '../../src/lib/http'
 
 /**
  * GET /api/members —— 已认证成员获取成员列表(去凭据,凭据永不过代理)。
@@ -25,7 +37,35 @@ export const onRequestGet = ({
       }
       throw new HttpError(401, 'unauthorized', '缺少会话凭据')
     }
-    await requireAuth(request, deps.secret)
+    await requireActiveAuth(request, deps)
     return { members: await listMembers(deps) }
+  })
+}
+
+/**
+ * POST /api/members —— 管理员创建成员账户(T9)。
+ * 用户名去空白后唯一,重复返回 409 member_duplicated;密码即刻哈希,凭据不出服务端。
+ */
+export const onRequestPost = ({
+  request,
+  env,
+}: {
+  request: Request
+  env: AuthEnv
+}): Promise<Response> => {
+  return handleApi(async () => {
+    const deps = createAuthDeps(env)
+    await requireActiveAdmin(request, deps)
+    const body = await readJsonBody(request)
+    const role = optionalString(body.role)
+    if (role !== undefined && role !== 'admin' && role !== 'member') {
+      throw new HttpError(400, 'invalid_request', 'role 只能是 admin 或 member')
+    }
+    return createMember(deps, {
+      username: requireString(body.username, 'username'),
+      displayName: requireString(body.displayName, 'displayName'),
+      password: requireString(body.password, 'password'),
+      role,
+    })
   })
 }

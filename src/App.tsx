@@ -5,6 +5,7 @@ import { AddExpensePage } from './pages/AddExpensePage'
 import { CategoriesPage } from './pages/CategoriesPage'
 import { EntriesPage } from './pages/EntriesPage'
 import { LoginPage } from './pages/LoginPage'
+import { MembersPage } from './pages/MembersPage'
 import { MePage } from './pages/MePage'
 import { PlaceholderPage } from './pages/PlaceholderPage'
 import { SetupPage } from './pages/SetupPage'
@@ -100,7 +101,7 @@ export default function App() {
 
 function Shell({ state }: { state: AppState }) {
   const [tab, setTab] = useState<TabKey>('add')
-  const [view, setView] = useState<'categories' | null>(null)
+  const [view, setView] = useState<'categories' | 'members' | null>(null)
 
   const openTab = (key: TabKey): void => {
     setTab(key)
@@ -117,6 +118,9 @@ function Shell({ state }: { state: AppState }) {
         {view === 'categories' ? (
           <CategoriesPage controller={appController} state={state} onBack={() => setView(null)} />
         ) : null}
+        {view === 'members' ? (
+          <MembersPage controller={appController} state={state} onBack={() => setView(null)} />
+        ) : null}
         {view === null ? (
           <>
             {tab === 'add' ? <AddExpensePage controller={appController} state={state} /> : null}
@@ -128,6 +132,7 @@ function Shell({ state }: { state: AppState }) {
                 controller={appController}
                 state={state}
                 onOpenCategories={() => setView('categories')}
+                onOpenMembers={() => setView('members')}
               />
             ) : null}
           </>

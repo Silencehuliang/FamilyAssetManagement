@@ -10,7 +10,16 @@ import {
   toPublicMember,
 } from './members'
 import { hashPassword, verifyPassword } from './password'
-import { type AuthDeps, changeOwnPassword, initialize, login, resetMemberPassword } from './service'
+import {
+  type AuthDeps,
+  changeOwnPassword,
+  createMember,
+  createMemberStatusLookup,
+  initialize,
+  login,
+  resetMemberPassword,
+  setMemberStatus,
+} from './service'
 
 const SECRET = 'service-test-secret'
 const NOW = new Date('2026-10-02T08:00:00Z')
@@ -254,6 +263,148 @@ describe('HttpError 契约', () => {
     const err = new HttpError(404, 'not_found')
     expect(err.message).toBe('not_found')
     expect(err.status).toBe(404)
+  })
+})
+
+describe('createMember(管理员建号,T9)', () => {
+  it('创建成员:去空白、默认 member、密码可登录并写入 members.json', async () => {
+    const admin = await seedRecord('ada', 'root-pw-123', { role: 'admin' })
+    const store = await storeWithRecords(admin)
+
+    const result = await createMember(makeDeps(store), {
+      username: '  xiaohong ',
+      displayName: ' 小红 ',
+      password: 'pw-123456',
+    })
+
+    expect(result.member).toMatchObject({
+      username: 'xiaohong',
+      displayName: '小红',
+      role: 'member',
+      disabled: false,
+    })
+    expect('passwordHash' in result.member).toBe(false)
+
+    const stored = parseMembers(store.files.get(MEMBERS_FILE)?.content ?? '')
+    expect(stored.map((m) => m.username)).toEqual(['ada', 'xiaohong'])
+    await expect(
+      login(makeDeps(store), { username: 'xiaohong', password: 'pw-123456' }),
+    ).resolves.toMatchObject({ member: { id: result.member.id } })
+  })
+
+  it('可显式创建管理员角色', async () => {
+    const store = await storeWithRecords(await seedRecord('ada', 'root-pw-123', { role: 'admin' }))
+    const result = await createMember(makeDeps(store), {
+      username: 'guanli',
+      displayName: '管理二号',
+      password: 'pw-123456',
+      role: 'admin',
+    })
+    expect(result.member.role).toBe('admin')
+  })
+
+  it('用户名重复返回 409 且不写入', async () => {
+    const store = await storeWithRecords(await seedRecord('ada', 'root-pw-123'))
+    await expect(
+      createMember(makeDeps(store), {
+        username: 'ada',
+        displayName: '重复',
+        password: 'pw-123456',
+      }),
+    ).rejects.toMatchObject({ status: 409, code: 'member_duplicated' })
+    expect(store.writes).toHaveLength(0)
+  })
+
+  it('空用户名/显示名/密码返回 400', async () => {
+    const store = await storeWithRecords(await seedRecord('ada', 'root-pw-123'))
+    await expect(
+      createMember(makeDeps(store), { username: '  ', displayName: '小红', password: 'pw-123456' }),
+    ).rejects.toMatchObject({ status: 400, code: 'invalid_request' })
+    await expect(
+      createMember(makeDeps(store), { username: 'xh', displayName: ' ', password: 'pw-123456' }),
+    ).rejects.toMatchObject({ status: 400, code: 'invalid_request' })
+    await expect(
+      createMember(makeDeps(store), { username: 'xh', displayName: '小红', password: '' }),
+    ).rejects.toMatchObject({ status: 400, code: 'invalid_request' })
+  })
+})
+
+describe('setMemberStatus(停用/启用,T9)', () => {
+  it('停用后登录 401 account_disabled,启用后恢复', async () => {
+    const admin = await seedRecord('ada', 'root-pw-123', { role: 'admin' })
+    const target = await seedRecord('xiaohong', 'pw-123456')
+    const store = await storeWithRecords(admin, target)
+    const deps = makeDeps(store)
+
+    const disabled = await setMemberStatus(deps, admin.id, { memberId: target.id, disabled: true })
+    expect(disabled.member.disabled).toBe(true)
+    await expect(
+      login(deps, { username: 'xiaohong', password: 'pw-123456' }),
+    ).rejects.toMatchObject({ status: 401, code: 'account_disabled' })
+
+    const enabled = await setMemberStatus(deps, admin.id, { memberId: target.id, disabled: false })
+    expect(enabled.member.disabled).toBe(false)
+    await expect(
+      login(deps, { username: 'xiaohong', password: 'pw-123456' }),
+    ).resolves.toMatchObject({ member: { id: target.id, disabled: false } })
+  })
+
+  it('不能停用自己(400 cannot_disable_self),可启用自己', async () => {
+    const admin = await seedRecord('ada', 'root-pw-123', { role: 'admin' })
+    const store = await storeWithRecords(admin)
+    await expect(
+      setMemberStatus(makeDeps(store), admin.id, { memberId: admin.id, disabled: true }),
+    ).rejects.toMatchObject({ status: 400, code: 'cannot_disable_self' })
+    expect(store.writes).toHaveLength(0)
+  })
+
+  it('成员不存在返回 404', async () => {
+    const store = await storeWithRecords(await seedRecord('ada', 'root-pw-123'))
+    await expect(
+      setMemberStatus(makeDeps(store), 'id-ada', { memberId: 'nobody', disabled: true }),
+    ).rejects.toMatchObject({ status: 404, code: 'member_not_found' })
+  })
+})
+
+describe('createMemberStatusLookup(停用校验缓存,T9)', () => {
+  it('TTL 内命中缓存不重复读仓库,过期后重新读取;停用立即反映', async () => {
+    let nowMs = 1_000_000
+    const record = await seedRecord('ada', 'root-pw-123')
+    const store = await storeWithRecords(record)
+    const originalGetFile = store.getFile.bind(store)
+    let reads = 0
+    store.getFile = (path: string) => {
+      reads += 1
+      return originalGetFile(path)
+    }
+    const lookup = createMemberStatusLookup(makeDeps(store), {
+      ttlMs: 30_000,
+      now: () => nowMs,
+      cache: new Map(),
+    })
+
+    await expect(lookup(record.id)).resolves.toBe(false)
+    expect(reads).toBe(1)
+
+    // 仓库中直接改为停用,但缓存未过期:仍返回缓存值(避免每请求读 GitHub)
+    store.files.set(MEMBERS_FILE, {
+      content: serializeMembers([{ ...record, disabled: true }]),
+      sha: 'sha2',
+    })
+    await expect(lookup(record.id)).resolves.toBe(false)
+    expect(reads).toBe(1)
+
+    nowMs += 30_001
+    await expect(lookup(record.id)).resolves.toBe(true)
+    expect(reads).toBe(2)
+    await expect(lookup(record.id)).resolves.toBe(true)
+    expect(reads).toBe(2)
+  })
+
+  it('成员不存在视为已停用(fail closed)', async () => {
+    const store = await storeWithRecords(await seedRecord('ada', 'root-pw-123'))
+    const lookup = createMemberStatusLookup(makeDeps(store), { cache: new Map() })
+    await expect(lookup('ghost')).resolves.toBe(true)
   })
 })
 

@@ -1,6 +1,5 @@
 import type { AuthEnv } from '../../../src/lib/auth/service'
-import { createAuthDeps } from '../../../src/lib/auth/service'
-import { requireAuth } from '../../../src/lib/auth/session'
+import { createAuthDeps, requireActiveAuth } from '../../../src/lib/auth/service'
 import { handleApi } from '../../../src/lib/http'
 import { listLedgerFiles } from '../../../src/lib/ledger-files'
 
@@ -14,7 +13,7 @@ export const onRequestGet = ({
 }): Promise<Response> => {
   return handleApi(async () => {
     const deps = createAuthDeps(env)
-    await requireAuth(request, deps.secret)
+    await requireActiveAuth(request, deps)
     return { files: await listLedgerFiles(deps.store) }
   })
 }

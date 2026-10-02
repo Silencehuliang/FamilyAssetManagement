@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import type { AuthResult, LoginInput, SetupInput, StoredSession } from '../api'
+import type {
+  AuthResult,
+  CreateMemberInput,
+  LoginInput,
+  ResetPasswordInput,
+  SetMemberStatusInput,
+  SetupInput,
+  StoredSession,
+} from '../api'
 import { ApiError } from '../api/client'
 import { addExpense, type Member } from '../domain'
 import { ADMIN, NOW, XIAOHONG } from '../domain/fixtures'
@@ -19,6 +27,11 @@ class FakeApi implements AppApi {
   setupCalls = 0
   loginCalls = 0
   unauthorizedHandler: (() => void) | undefined
+  createMemberError: unknown = null
+  statusError: unknown = null
+  resetPasswordError: unknown = null
+  readonly statusCalls: SetMemberStatusInput[] = []
+  readonly resetCalls: ResetPasswordInput[] = []
 
   getSession(): StoredSession | null {
     return this.session
@@ -30,6 +43,37 @@ class FakeApi implements AppApi {
 
   setOnUnauthorized(handler: () => void): void {
     this.unauthorizedHandler = handler
+  }
+
+  async createMember(input: CreateMemberInput): Promise<Member> {
+    if (this.createMemberError) throw this.createMemberError
+    const member: Member = {
+      id: `id-${input.username}`,
+      username: input.username,
+      displayName: input.displayName,
+      role: input.role ?? 'member',
+      disabled: false,
+      createdAt: NOW,
+    }
+    this.members = [...this.members, member]
+    return member
+  }
+
+  async setMemberStatus(input: SetMemberStatusInput): Promise<Member> {
+    if (this.statusError) throw this.statusError
+    this.statusCalls.push({ ...input })
+    this.members = this.members.map((m) =>
+      m.id === input.memberId ? { ...m, disabled: input.disabled } : m,
+    )
+    const updated = this.members.find((m) => m.id === input.memberId)
+    if (!updated) throw new ApiError(404, 'member_not_found', '成员不存在')
+    return updated
+  }
+
+  async resetMemberPassword(input: ResetPasswordInput): Promise<Member> {
+    if (this.resetPasswordError) throw this.resetPasswordError
+    this.resetCalls.push({ ...input })
+    return this.members.find((m) => m.id === input.memberId) ?? XIAOHONG
   }
 
   async setup(input: SetupInput): Promise<AuthResult> {
@@ -555,5 +599,90 @@ describe('AppController 分类管理(T8)', () => {
     await expect(controller.deleteCategory('cat-dining-2')).rejects.toThrow(/仅管理员/)
     expect(controller.getLedger().meta.categories.some((c) => c.name === '咖啡')).toBe(false)
     await expect(store.loadQueueOps()).resolves.toEqual([])
+  })
+})
+
+describe('AppController 成员管理(T9)', () => {
+  async function readyController(actor: Member = ADMIN) {
+    const api = new FakeApi()
+    api.session = sessionOf(actor)
+    api.members = [ADMIN, XIAOHONG]
+    const made = makeController({ api })
+    await made.controller.boot()
+    return { ...made, api }
+  }
+
+  it('管理员创建成员:返回公开成员并刷新列表(记一笔经手人可见)', async () => {
+    const { controller, api } = await readyController()
+
+    const created = await controller.createMember({
+      username: 'dali',
+      displayName: '大力',
+      password: 'pw-123456',
+    })
+
+    expect(created).toMatchObject({
+      id: 'id-dali',
+      username: 'dali',
+      displayName: '大力',
+      role: 'member',
+      disabled: false,
+    })
+    expect(created).not.toHaveProperty('passwordHash')
+    expect(controller.getState().members.map((m) => m.username)).toEqual([
+      'aming',
+      'xiaohong',
+      'dali',
+    ])
+    expect(api.members.some((m) => m.username === 'dali')).toBe(true)
+  })
+
+  it('管理员可按角色创建;停用/启用成员后列表状态同步刷新', async () => {
+    const { controller, api } = await readyController()
+    const created = await controller.createMember({
+      username: 'guanli',
+      displayName: '管理二号',
+      password: 'pw-123456',
+      role: 'admin',
+    })
+    expect(created.role).toBe('admin')
+
+    const disabled = await controller.setMemberStatus(created.id, true)
+    expect(disabled.disabled).toBe(true)
+    expect(controller.getState().members.find((m) => m.id === created.id)?.disabled).toBe(true)
+    expect(api.statusCalls).toEqual([{ memberId: created.id, disabled: true }])
+
+    await controller.setMemberStatus(created.id, false)
+    expect(controller.getState().members.find((m) => m.id === created.id)?.disabled).toBe(false)
+  })
+
+  it('重置密码透传 memberId 与新密码', async () => {
+    const { controller, api } = await readyController()
+
+    await controller.resetMemberPassword(XIAOHONG.id, 'new-pw-123')
+
+    expect(api.resetCalls).toEqual([{ memberId: XIAOHONG.id, newPassword: 'new-pw-123' }])
+  })
+
+  it('普通成员调用成员管理被拒(forbidden),不触达 API', async () => {
+    const { controller, api } = await readyController(XIAOHONG)
+
+    await expect(
+      controller.createMember({ username: 'dali', displayName: '大力', password: 'pw-123456' }),
+    ).rejects.toThrow(/仅管理员/)
+    await expect(controller.setMemberStatus(ADMIN.id, true)).rejects.toThrow(/仅管理员/)
+    await expect(controller.resetMemberPassword(ADMIN.id, 'pw-123456')).rejects.toThrow(/仅管理员/)
+    expect(api.statusCalls).toEqual([])
+    expect(api.resetCalls).toEqual([])
+    expect(api.members.some((m) => m.username === 'dali')).toBe(false)
+  })
+
+  it('服务端错误(如用户名重复 409)原样抛出', async () => {
+    const { controller, api } = await readyController()
+    api.createMemberError = new ApiError(409, 'member_duplicated', '用户名已存在')
+
+    await expect(
+      controller.createMember({ username: 'aming', displayName: '重复', password: 'pw-123456' }),
+    ).rejects.toMatchObject({ status: 409, code: 'member_duplicated' })
   })
 })

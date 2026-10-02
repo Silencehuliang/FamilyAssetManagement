@@ -8,7 +8,16 @@
  * 3. 无会话 → GET /api/members 探测:members_file_missing → 初始化向导,401 → 登录页;
  * 4. 进入主界面后立即跑一轮 replay(queue, local, remote)。
  */
-import type { AuthResult, LedgerApi, LoginInput, SetupInput, StoredSession } from '../api'
+import type {
+  AuthResult,
+  CreateMemberInput,
+  LedgerApi,
+  LoginInput,
+  ResetPasswordInput,
+  SetMemberStatusInput,
+  SetupInput,
+  StoredSession,
+} from '../api'
 import { ApiError } from '../api/client'
 import {
   addCategory as addCategoryInLedger,
@@ -42,11 +51,14 @@ import { SyncManager, type SyncStatus } from './sync'
 
 export type AppPhase = 'booting' | 'setup' | 'login' | 'ready'
 
-/** 控制器依赖的 API 面:rest 接口 + 会话读写(ApiClient 结构化满足) */
+/** 控制器依赖的 API 面:rest 接口 + 会话读写 + 成员管理(T9;ApiClient 结构化满足) */
 export interface AppApi extends LedgerApi {
   getSession(): StoredSession | null
   clearSession(): void
   setOnUnauthorized?(handler: () => void): void
+  createMember(input: CreateMemberInput): Promise<Member>
+  setMemberStatus(input: SetMemberStatusInput): Promise<Member>
+  resetMemberPassword(input: ResetPasswordInput): Promise<Member>
 }
 
 export interface AppState {
@@ -316,6 +328,39 @@ export class AppController {
     this.queue.record({ type: 'delete-category', id })
     await this.persistLedger()
     void this.syncManager?.syncNow()
+  }
+
+  /**
+   * 创建成员(T9,仅管理员):成功后刷新成员列表,记一笔的经手人选择立即更新。
+   */
+  async createMember(input: CreateMemberInput): Promise<Member> {
+    this.assertAdmin()
+    const created = await this.deps.api.createMember(input)
+    await this.refreshMembers(created)
+    return created
+  }
+
+  /**
+   * 停用/启用成员(T9,仅管理员):服务端停用后该成员旧会话的同步与请求随即被拒;
+   * 成功后刷新成员列表(停用成员从经手人选择中消失/恢复)。
+   */
+  async setMemberStatus(memberId: string, disabled: boolean): Promise<Member> {
+    this.assertAdmin()
+    const updated = await this.deps.api.setMemberStatus({ memberId, disabled })
+    await this.refreshMembers(updated)
+    return updated
+  }
+
+  /** 重置成员密码(T9,仅管理员) */
+  async resetMemberPassword(memberId: string, newPassword: string): Promise<void> {
+    this.assertAdmin()
+    await this.deps.api.resetMemberPassword({ memberId, newPassword })
+  }
+
+  private assertAdmin(): void {
+    if (this.state.member?.role !== 'admin') {
+      throw new DomainError('forbidden', '仅管理员可管理成员')
+    }
   }
 
   private nowIso(): string {
