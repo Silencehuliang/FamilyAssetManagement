@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { addExpense, canEditExpense, deleteExpense, updateExpense } from './expenses'
 import {
   ADMIN,
+  DALI,
   expenseAt,
   fixtureLedger,
   LAOSAN,
@@ -133,6 +134,35 @@ describe('updateExpense / deleteExpense 权限:透明 + 自我编辑', () => {
     const { id } = expenseAt(ledger, '2026-10', 0)
     expect(() => updateExpense(ledger, id, { amountCents: -5 }, ctx())).toThrowError(DomainError)
     expect(() => updateExpense(ledger, id, { categoryId: 'cat-dining-3' }, ctx())).not.toThrow()
+  })
+
+  it('代记:经手人与记录者都有编辑权,无关成员没有', () => {
+    const ledger = fixtureLedger()
+    addExpense(
+      ledger,
+      { amountCents: 8800, date: '2026-10-02', categoryId: LUNCH_CATEGORY, memberId: ADMIN.id },
+      ctx(),
+    )
+    const proxy = expenseAt(ledger, '2026-10', 0)
+    expect(proxy.memberId).toBe(ADMIN.id)
+    expect(proxy.recordedBy).toBe(XIAOHONG.id)
+    expect(canEditExpense(ADMIN, proxy)).toBe(true)
+    expect(canEditExpense(XIAOHONG, proxy)).toBe(true)
+    expect(canEditExpense(DALI, proxy)).toBe(false)
+    expect(() => updateExpense(ledger, proxy.id, { note: '顺手改一下' }, ctx(ADMIN))).not.toThrow()
+    expect(() => deleteExpense(ledger, proxy.id, ctx(DALI))).toThrowError(DomainError)
+  })
+
+  it('代记后可以修正经手人', () => {
+    const ledger = fixtureLedger()
+    addExpense(
+      ledger,
+      { amountCents: 100, date: '2026-10-02', categoryId: LUNCH_CATEGORY, memberId: ADMIN.id },
+      ctx(),
+    )
+    const { id } = expenseAt(ledger, '2026-10', 0)
+    updateExpense(ledger, id, { memberId: DALI.id }, ctx())
+    expect(expenseAt(ledger, '2026-10', 0).memberId).toBe(DALI.id)
   })
 
   it('删除最后一条后该月文件消失', () => {

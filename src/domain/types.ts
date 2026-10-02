@@ -36,6 +36,8 @@ export interface Expense {
   tagNames: string[]
   /** 经手人 */
   memberId: MemberId
+  /** 记录者(代记时与经手人不同) */
+  recordedBy: MemberId
   note?: string
   createdAt: string
   updatedAt: string
@@ -77,6 +79,7 @@ export interface MonthData {
 /**
  * 账本的内存形态。与仓库文件的对应关系(见 docs/adr/0005):
  * months[m] ↔ ledger/months/<m>.json;meta.members ↔ ledger/meta/members.json;依此类推。
+ * 领域操作原地修改传入的账本并返回它;记录级冲突以 updatedAt 后写胜出(ADR-0004)。
  */
 export interface LedgerData {
   meta: LedgerMeta

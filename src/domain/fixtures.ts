@@ -25,11 +25,19 @@ export const LAOSAN: Member = {
   disabled: true,
   createdAt: '2026-09-01T08:00:00.000Z',
 }
+export const DALI: Member = {
+  id: 'm-dl',
+  username: 'dali',
+  displayName: '大力',
+  role: 'member',
+  disabled: false,
+  createdAt: '2026-09-01T08:00:00.000Z',
+}
 
 export function fixtureLedger(): LedgerData {
   return {
     meta: {
-      members: [ADMIN, XIAOHONG, LAOSAN],
+      members: [ADMIN, XIAOHONG, LAOSAN, DALI],
       categories: structuredClone(DEFAULT_CATEGORIES),
       budgets: {},
       recurring: [],

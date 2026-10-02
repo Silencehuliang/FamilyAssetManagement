@@ -1,3 +1,4 @@
+import { findCategory } from './lookup'
 import type { Category, CategoryId, LedgerData, Member } from './types'
 import { DomainError } from './types'
 
@@ -24,12 +25,6 @@ export interface CategoryInput {
 
 function requireAdmin(actor: Member): void {
   if (actor.role !== 'admin') throw new DomainError('forbidden', '仅管理员可管理分类')
-}
-
-function findCategory(ledger: LedgerData, id: CategoryId): Category {
-  const category = ledger.meta.categories.find((c) => c.id === id)
-  if (!category) throw new DomainError('unknown_category', `分类不存在:${id}`)
-  return category
 }
 
 export function addCategory(ledger: LedgerData, actor: Member, input: CategoryInput): LedgerData {
