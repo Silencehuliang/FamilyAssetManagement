@@ -6,6 +6,20 @@
   --brand: #16a34a;
   --brand-dim: #dcfce7;
   --border: #e2e8f0;
+  --danger: #dc2626;
+  --danger-dim: #fee2e2;
+  --warning: #b45309;
+  --warning-border: #f59e0b;
+  --on-brand: #ffffff;
+  --overlay: rgba(15, 23, 42, 0.45);
+  --chart-1: #16a34a;
+  --chart-2: #0ea5e9;
+  --chart-3: #f59e0b;
+  --chart-4: #8b5cf6;
+  --chart-5: #ec4899;
+  --chart-6: #14b8a6;
+  --chart-7: #f97316;
+  --chart-8: #6366f1;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -17,6 +31,20 @@
     --brand: #22c55e;
     --brand-dim: #14301f;
     --border: #1e293b;
+    --danger: #f87171;
+    --danger-dim: #3f1d1d;
+    --warning: #fbbf24;
+    --warning-border: #d97706;
+    --on-brand: #052e16;
+    --overlay: rgba(2, 6, 23, 0.65);
+    --chart-1: #22c55e;
+    --chart-2: #38bdf8;
+    --chart-3: #fbbf24;
+    --chart-4: #a78bfa;
+    --chart-5: #f472b6;
+    --chart-6: #2dd4bf;
+    --chart-7: #fb923c;
+    --chart-8: #818cf8;
   }
 }
 
@@ -125,13 +153,13 @@ body {
 }
 
 .sync-badge[data-state="syncing"] {
-  color: #b45309;
-  border-color: #f59e0b;
+  color: var(--warning);
+  border-color: var(--warning-border);
 }
 
 .sync-badge[data-state="error"] {
-  color: #dc2626;
-  border-color: #dc2626;
+  color: var(--danger);
+  border-color: var(--danger);
 }
 
 /* 登录 / 初始化向导 */
@@ -197,7 +225,7 @@ body {
 }
 
 .form-error {
-  color: #dc2626;
+  color: var(--danger);
   font-size: 13px;
   margin: 0 0 12px;
 }
@@ -208,7 +236,7 @@ body {
   border: 0;
   border-radius: 10px;
   background: var(--brand);
-  color: #ffffff;
+  color: var(--on-brand);
   font-size: 15px;
   font-weight: 600;
   padding: 12px;
@@ -223,10 +251,10 @@ body {
 .danger-button {
   width: 100%;
   appearance: none;
-  border: 1px solid #dc2626;
+  border: 1px solid var(--danger);
   border-radius: 10px;
   background: none;
-  color: #dc2626;
+  color: var(--danger);
   font-size: 15px;
   padding: 12px;
   cursor: pointer;
@@ -309,7 +337,7 @@ body {
   grid-template-columns: 1fr 1fr;
   gap: 12px;
   background: var(--brand);
-  color: #ffffff;
+  color: var(--on-brand);
   border-radius: 14px;
   padding: 16px;
 }
@@ -579,7 +607,7 @@ body {
 .sheet-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(15, 23, 42, 0.45);
+  background: var(--overlay);
   display: flex;
   align-items: flex-end;
   justify-content: center;
@@ -658,7 +686,7 @@ body {
 }
 
 .danger-text {
-  color: #dc2626;
+  color: var(--danger);
 }
 
 .category-children {
@@ -675,4 +703,281 @@ body {
   padding: 8px 0;
   border-top: 1px solid var(--border);
   font-size: 14px;
+}
+
+/* 统计页(T10):范围切换、手写 SVG 图表与图例 */
+.stats-range-hint {
+  margin: 12px 0 0;
+}
+
+.stats-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.stats-head .card-title {
+  margin: 0;
+}
+
+.stats-head .chip {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.chart-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin-top: 10px;
+}
+
+.chart-bar {
+  fill: var(--brand);
+}
+
+.chart-bar-empty {
+  fill: var(--border);
+}
+
+.chart-label,
+.chart-value {
+  fill: var(--text-dim);
+  font-size: 10px;
+}
+
+.chart-value {
+  font-variant-numeric: tabular-nums;
+}
+
+.donut {
+  max-width: 216px;
+  margin: 10px auto 0;
+}
+
+.donut-total {
+  fill: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.donut-caption {
+  fill: var(--text-dim);
+  font-size: 10px;
+}
+
+.legend-list {
+  list-style: none;
+  margin: 14px 0 0;
+  padding: 0;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.legend-item:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.legend-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.legend-amount {
+  font-variant-numeric: tabular-nums;
+}
+
+.legend-percent {
+  width: 48px;
+  text-align: right;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.bar-list {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+}
+
+.bar-item {
+  padding: 8px 0;
+}
+
+.bar-item + .bar-item {
+  border-top: 1px solid var(--border);
+}
+
+.bar-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.bar-amount {
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.bar-track {
+  height: 8px;
+  margin-top: 6px;
+  border-radius: 999px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--brand);
+}
+
+/* 预算页(T11):月份标题、进度条与达成标记 */
+.month-title {
+  flex: 1;
+  text-align: center;
+  font-size: 15px;
+}
+
+.budget-numbers {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin: 4px 0 12px;
+}
+
+.budget-numbers > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.budget-numbers strong {
+  font-size: 17px;
+  font-variant-numeric: tabular-nums;
+}
+
+.progress-track {
+  height: 10px;
+  border-radius: 999px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--brand);
+  transition: width 0.2s ease;
+}
+
+.progress-over {
+  background: var(--danger);
+}
+
+.amount-over {
+  color: var(--danger);
+}
+
+.amount-ok {
+  color: var(--brand);
+}
+
+.budget-alert {
+  margin: 8px 0 0;
+}
+
+.budget-row-meta {
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+.outcome {
+  display: inline-block;
+  font-size: 12px;
+  border-radius: 999px;
+  padding: 1px 10px;
+  border: 1px solid currentColor;
+}
+
+.outcome-ok {
+  color: var(--brand);
+  background: var(--brand-dim);
+}
+
+.outcome-over {
+  color: var(--danger);
+  background: var(--danger-dim);
+}
+
+.history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.history-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.history-item:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.history-month {
+  appearance: none;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font-size: 13px;
+  padding: 0;
+  cursor: pointer;
+}
+
+/* 周期支出(T12) */
+.recurring-main {
+  min-width: 0;
+}
+
+.recurring-amount {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.recurring-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }

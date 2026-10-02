@@ -10,6 +10,7 @@
  */
 import type {
   AuthResult,
+  ChangePasswordInput,
   CreateMemberInput,
   LedgerApi,
   LoginInput,
@@ -22,18 +23,30 @@ import { ApiError } from '../api/client'
 import {
   addCategory as addCategoryInLedger,
   addExpense,
+  addRecurring as addRecurringInLedger,
+  type BudgetPatch,
   type Category,
   type CategoryId,
+  clearBudget as clearBudgetInLedger,
   createEmptyLedger,
   deleteCategory as deleteCategoryInLedger,
   deleteExpense as deleteExpenseInLedger,
   type Expense,
   type ExpenseId,
+  generateDueExpenses,
   type LedgerData,
   type Member,
   type MonthKey,
+  type RecurringExpense,
+  type RecurringId,
+  type RecurringInput,
+  type RecurringPatch,
+  removeRecurring as removeRecurringInLedger,
+  setCategoryBudget as setCategoryBudgetInLedger,
+  setTotalBudget as setTotalBudgetInLedger,
   updateCategory as updateCategoryInLedger,
   updateExpense as updateExpenseInLedger,
+  updateRecurring as updateRecurringInLedger,
 } from '../domain'
 import { DomainError } from '../domain/types'
 import { nextSortOrder } from '../features/categories'
@@ -42,6 +55,7 @@ import {
   buildExpensePatch,
   type EntryForm,
   ensureCategories,
+  todayKey,
 } from '../features/entry'
 import type { LocalStore } from '../storage'
 import { MemoryLocalStore, PersistentQueue } from '../storage'
@@ -59,6 +73,7 @@ export interface AppApi extends LedgerApi {
   createMember(input: CreateMemberInput): Promise<Member>
   setMemberStatus(input: SetMemberStatusInput): Promise<Member>
   resetMemberPassword(input: ResetPasswordInput): Promise<Member>
+  changePassword(input: ChangePasswordInput): Promise<Member>
 }
 
 export interface AppState {
@@ -83,6 +98,8 @@ export interface AppControllerDeps {
   isOnline?: () => boolean
   now?: () => Date
   newId?: () => string
+  /** 本地「今天」(YYYY-MM-DD);测试注入,缺省取本机日期 */
+  today?: () => string
 }
 
 function errorText(err: unknown): string {
@@ -158,7 +175,7 @@ export class AppController {
       getRole: () => this.deps.api.getSession()?.member.role,
       isOnline: this.deps.isOnline,
       onStatus: (status, error) => this.setState({ syncStatus: status, syncError: error }),
-      onSynced: () => this.persistLedger(),
+      onSynced: () => this.handleSynced(),
     })
     this.setState({ ledger: { ...this.ledger }, members: [...this.ledger.meta.members] })
 
@@ -331,6 +348,81 @@ export class AppController {
   }
 
   /**
+   * 设置/修改月度预算(T11,仅管理员;领域层二次门禁):
+   * patch.totalCents 设置总预算、null 清除;categoryId + categoryCents 设置/清除分类预算。
+   * 本地生效 → 写穿 IndexedDB → 后台同步(budgets.json 由管理员推送,成员端只拉)。
+   */
+  async setBudget(month: MonthKey, patch: BudgetPatch): Promise<void> {
+    const actor = this.currentActor()
+    if (patch.totalCents !== undefined) {
+      setTotalBudgetInLedger(this.ledger, actor, month, patch.totalCents)
+    }
+    if (patch.categoryId !== undefined) {
+      setCategoryBudgetInLedger(
+        this.ledger,
+        actor,
+        month,
+        patch.categoryId,
+        patch.categoryCents ?? null,
+      )
+    }
+    await this.persistLedger()
+    void this.syncManager?.syncNow()
+  }
+
+  /**
+   * 清除整月预算(T11,仅管理员):本地删除并登记 clear-budget 离线操作,
+   * 由 replay 在同步时补删远端,防止其他设备的旧预算被合并回来。
+   */
+  async clearBudget(month: MonthKey): Promise<void> {
+    const actor = this.currentActor()
+    clearBudgetInLedger(this.ledger, actor, month)
+    this.queue.record({ type: 'clear-budget', month })
+    await this.persistLedger()
+    void this.syncManager?.syncNow()
+  }
+
+  /**
+   * 新增周期支出规则(T12):任何启用成员可创建,createdBy 为创建者;
+   * 保存后台同步,补记由 enterApp/每轮同步后的 materializeRecurring 完成。
+   */
+  async addRecurring(input: RecurringInput): Promise<RecurringExpense> {
+    const actor = this.currentActor()
+    const id = this.generateId()
+    addRecurringInLedger(this.ledger, input, { actor, now: this.nowIso(), newId: id })
+    const created = this.ledger.meta.recurring.find((rule) => rule.id === id)
+    if (!created) throw new Error('新增周期支出后未找到规则')
+    await this.persistLedger()
+    void this.syncManager?.syncNow()
+    return created
+  }
+
+  /**
+   * 修改周期支出规则(T12,创建者/经手人/管理员):只影响之后的期次,
+   * 已生成的支出因确定性 id 命中而保留原值。
+   */
+  async updateRecurring(id: RecurringId, patch: RecurringPatch): Promise<void> {
+    const actor = this.currentActor()
+    updateRecurringInLedger(this.ledger, id, patch, {
+      actor,
+      now: this.nowIso(),
+      newId: this.generateId(),
+    })
+    await this.persistLedger()
+    void this.syncManager?.syncNow()
+  }
+
+  /** 删除周期支出规则(T12):登记 delete-recurring 离线墓碑;已生成的支出保留 */
+  async removeRecurring(id: RecurringId): Promise<void> {
+    const actor = this.currentActor()
+    const now = this.nowIso()
+    removeRecurringInLedger(this.ledger, id, { actor, now, newId: this.generateId() })
+    this.queue.record({ type: 'delete-recurring', id, deletedAt: now })
+    await this.persistLedger()
+    void this.syncManager?.syncNow()
+  }
+
+  /**
    * 创建成员(T9,仅管理员):成功后刷新成员列表,记一笔的经手人选择立即更新。
    */
   async createMember(input: CreateMemberInput): Promise<Member> {
@@ -355,6 +447,15 @@ export class AppController {
   async resetMemberPassword(memberId: string, newPassword: string): Promise<void> {
     this.assertAdmin()
     await this.deps.api.resetMemberPassword({ memberId, newPassword })
+  }
+
+  /**
+   * 修改自己的密码(T13):当前密码由服务端校验(错误时抛 401 wrong_password,
+   * 客户端保留了会话);成功后旧密码即失效,当前会话不受影响。
+   */
+  async changePassword(currentPassword: string, newPassword: string): Promise<void> {
+    if (!this.state.member) throw new DomainError('unauthorized', '未登录')
+    await this.deps.api.changePassword({ currentPassword, newPassword })
   }
 
   private assertAdmin(): void {
@@ -415,7 +516,38 @@ export class AppController {
     await this.refreshMembers(session.member)
     await this.store.saveLedger(this.ledger)
     this.touchLedger()
+    // 打开应用先补记周期支出(离线也会本地生成;确定性 id 让联网后的合并幂等收敛)
+    await this.materializeRecurring()
     await this.syncManager?.syncNow()
+  }
+
+  /**
+   * 一轮同步成功后的收尾:写穿账本 → 补记周期支出;若补记产生新支出,
+   * 再触发一轮同步把它们推给其他设备(SyncManager 会合并为补跑轮次,自然收敛)。
+   */
+  private async handleSynced(): Promise<void> {
+    await this.persistLedger()
+    if (await this.materializeRecurring()) {
+      void this.syncManager?.syncNow()
+    }
+  }
+
+  /** 周期支出补记(T12,幂等);返回本轮是否产生新支出 */
+  private async materializeRecurring(): Promise<boolean> {
+    try {
+      const { generated } = generateDueExpenses(this.ledger, this.today(), this.nowIso())
+      if (generated === 0) return false
+      await this.persistLedger()
+      return true
+    } catch (err) {
+      // 规则数据异常不应阻断同步主流程:跳过本次补记,下次同步再试
+      console.error('周期支出补记失败', err)
+      return false
+    }
+  }
+
+  private today(): string {
+    return (this.deps.today ?? (() => todayKey()))()
   }
 
   private async refreshMembers(sessionMember: Member): Promise<void> {
