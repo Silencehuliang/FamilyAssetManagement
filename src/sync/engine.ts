@@ -1,5 +1,5 @@
 import type { Budget, Category, Expense, LedgerData, Member, MonthKey } from '../domain'
-import type { SyncEndpoint } from './endpoint'
+import type { RemoteFile, SyncEndpoint } from './endpoint'
 import { filesToLedger, isLedgerFilePath, ledgerToFiles } from './files'
 
 /**
@@ -143,6 +143,35 @@ function mergeLedgers(
 }
 
 /**
+ * 把 `after` 中与远端内容不同的文件增量写回端点:内容未变化不产生写操作,
+ * 合并后消失的文件(空月份)从端点删除。返回写操作数(putFile 与 deleteFile 都计入)。
+ */
+export async function pushFiles(
+  endpoint: SyncEndpoint,
+  after: Record<string, string>,
+  remoteFiles: Record<string, RemoteFile>,
+  paths: Iterable<string>,
+): Promise<number> {
+  let pushed = 0
+  for (const path of paths) {
+    const next = after[path]
+    const current = remoteFiles[path]
+    if (next === undefined) {
+      if (current) {
+        await endpoint.deleteFile(path, current.revision)
+        pushed += 1
+      }
+      continue
+    }
+    if (current?.content !== next) {
+      await endpoint.putFile(path, next, current?.revision)
+      pushed += 1
+    }
+  }
+  return pushed
+}
+
+/**
  * 执行一轮同步:拉取端点文件 → 与 local 记录级合并 → 把合并后内容与远端不同的文件
  * 逐个写回(增量:内容未变化的文件不产生 putFile)。local 被原地更新为合并状态。
  */
@@ -159,25 +188,13 @@ export async function sync(local: LedgerData, endpoint: SyncEndpoint): Promise<S
   local.meta = merged.meta
   local.months = merged.months
 
-  let pushedFiles = 0
   const after = ledgerToFiles(local)
-  const paths = [...new Set([...Object.keys(remoteContent), ...Object.keys(after)])]
-  for (const path of paths) {
-    const next = after[path]
-    const current = remoteFiles[path]
-    if (next === undefined) {
-      // 合并后该文件消失(只可能是空月份文件):从端点删除
-      if (current) {
-        await endpoint.deleteFile(path, current.revision)
-        pushedFiles += 1
-      }
-      continue
-    }
-    if (current?.content !== next) {
-      await endpoint.putFile(path, next, current?.revision)
-      pushedFiles += 1
-    }
-  }
+  const pushedFiles = await pushFiles(
+    endpoint,
+    after,
+    remoteFiles,
+    new Set([...Object.keys(remoteContent), ...Object.keys(after)]),
+  )
 
   let pulledFiles = 0
   for (const path of Object.keys(remoteContent)) {

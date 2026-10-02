@@ -1,7 +1,7 @@
 import type { CategoryId, ExpenseId, LedgerData, MonthKey, RecurringId } from '../domain'
 import type { SyncEndpoint } from './endpoint'
 import type { SyncResult } from './engine'
-import { sync } from './engine'
+import { pushFiles, sync } from './engine'
 import {
   BUDGETS_FILE,
   CATEGORIES_FILE,
@@ -128,21 +128,7 @@ export async function replay(
 
     const after = ledgerToFiles(local)
     const remoteFiles = await endpoint.listFiles()
-    for (const path of touched) {
-      const next = after[path]
-      const current = remoteFiles[path]
-      if (next === undefined) {
-        if (current) {
-          await endpoint.deleteFile(path, current.revision)
-          result.pushedFiles += 1
-        }
-        continue
-      }
-      if (current?.content !== next) {
-        await endpoint.putFile(path, next, current?.revision)
-        result.pushedFiles += 1
-      }
-    }
+    result.pushedFiles += await pushFiles(endpoint, after, remoteFiles, touched)
   }
 
   queue.clear()
