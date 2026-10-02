@@ -42,6 +42,7 @@ function makeManager(options: {
   endpoint?: SyncEndpoint
   queue?: PendingQueue
   online?: () => boolean
+  role?: 'admin' | 'member'
 }) {
   const statuses: SyncStatus[] = []
   const ledger = options.ledger ?? fixtureLedger()
@@ -49,6 +50,7 @@ function makeManager(options: {
     endpoint: options.endpoint ?? new InMemoryEndpoint(),
     queue: options.queue ?? new PendingQueue(),
     ledger,
+    getRole: () => options.role,
     isOnline: options.online,
     onStatus: (status) => statuses.push(status),
   })
@@ -186,6 +188,61 @@ describe('SyncManager 首次播种与离线删除回放', () => {
     expect(manager.status).toBe('synced')
     expect(queue.size).toBe(0)
     expect((await endpoint.listFiles())[monthFilePath('2026-10')]).toBeUndefined()
+  })
+})
+
+describe('SyncManager 角色合并策略(T8 评审要求)', () => {
+  /** 远端分类被管理员改名;本地持有旧名 */
+  function remoteRenamed() {
+    const remote = fixtureLedger()
+    remote.meta.categories = remote.meta.categories.map((c) =>
+      c.id === 'cat-dining' ? { ...c, name: '吃饭' } : c,
+    )
+    const ledger = fixtureLedger()
+    ledger.meta.categories = ledger.meta.categories.map((c) =>
+      c.id === 'cat-dining' ? { ...c, name: '旧叫法' } : c,
+    )
+    return { ledger, endpoint: new InMemoryEndpoint(ledgerToFiles(remote)) }
+  }
+
+  it('成员角色:同步后本地分类等于远端(采纳管理员改动,不回推旧副本)', async () => {
+    const { ledger, endpoint } = remoteRenamed()
+    const { manager } = makeManager({ ledger, endpoint, role: 'member' })
+
+    await manager.syncNow()
+
+    expect(manager.status).toBe('synced')
+    expect(ledger.meta.categories.find((c) => c.id === 'cat-dining')?.name).toBe('吃饭')
+    const contents = Object.fromEntries(
+      Object.entries(await endpoint.listFiles()).map(([path, file]) => [path, file.content]),
+    )
+    expect(filesToLedger(contents).meta.categories.find((c) => c.id === 'cat-dining')?.name).toBe(
+      '吃饭',
+    )
+  })
+
+  it('管理员角色:local-wins,本地编辑保留并推送到远端', async () => {
+    const { ledger, endpoint } = remoteRenamed()
+    const { manager } = makeManager({ ledger, endpoint, role: 'admin' })
+
+    await manager.syncNow()
+
+    expect(ledger.meta.categories.find((c) => c.id === 'cat-dining')?.name).toBe('旧叫法')
+    const contents = Object.fromEntries(
+      Object.entries(await endpoint.listFiles()).map(([path, file]) => [path, file.content]),
+    )
+    expect(filesToLedger(contents).meta.categories.find((c) => c.id === 'cat-dining')?.name).toBe(
+      '旧叫法',
+    )
+  })
+
+  it('角色缺省(未注入)时保持 local-wins,既有行为不变', async () => {
+    const { ledger, endpoint } = remoteRenamed()
+    const { manager } = makeManager({ ledger, endpoint })
+
+    await manager.syncNow()
+
+    expect(ledger.meta.categories.find((c) => c.id === 'cat-dining')?.name).toBe('旧叫法')
   })
 })
 

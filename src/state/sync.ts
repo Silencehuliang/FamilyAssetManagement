@@ -8,15 +8,15 @@
  * - 并发调用合并为同一轮(界面进入即触发 + 在线事件 + 手动重试可能叠加)。
  */
 import { ApiError } from '../api/client'
-import { DEFAULT_CATEGORIES, type LedgerData } from '../domain'
+import { DEFAULT_CATEGORIES, type LedgerData, type Role } from '../domain'
 import type { SyncEndpoint } from '../sync'
 import {
+  type AdminFilesPolicy,
   CATEGORIES_FILE,
   type PendingQueue,
   replay,
   SyncConflictError,
   type SyncResult,
-  sync,
 } from '../sync'
 
 export type SyncStatus = 'offline' | 'syncing' | 'synced' | 'error'
@@ -25,6 +25,11 @@ export interface SyncManagerDeps {
   endpoint: SyncEndpoint
   queue: PendingQueue
   ledger: LedgerData
+  /**
+   * 当前登录成员的角色(经 api.getSession 读取)。成员端对分类/预算采用远端版本,
+   * 避免用本地旧副本回推管理员的改动;缺省视作管理员,保持既有 local-wins 行为。
+   */
+  getRole?: () => Role | undefined
   /** 默认读 navigator.onLine;测试注入 */
   isOnline?: () => boolean
   /** 状态变化回调(界面刷新徽标) */
@@ -46,6 +51,8 @@ function errorText(err: unknown): string {
 export class SyncManager {
   private readonly deps: SyncManagerDeps
   private inFlight: Promise<SyncResult | null> | null = null
+  /** 本轮同步进行中又收到同步请求:结束当前轮后立刻补跑一轮,避免新变更滞留本地 */
+  private pendingRerun = false
   private currentStatus: SyncStatus = 'offline'
   private lastError: string | undefined
 
@@ -70,10 +77,14 @@ export class SyncManager {
 
   /**
    * 跑一轮同步。永不抛错:失败体现在 status/lastError 上,便于界面「重试」按钮调用。
-   * 离线时直接置 offline 不发请求;并发调用复用同一 Promise。
+   * 离线时直接置 offline 不发请求;并发调用复用同一 Promise,但会登记一轮补跑,
+   * 保证「同步进行中产生的变更」在下一轮立即推送(而不是拖到下一次触发)。
    */
   syncNow(): Promise<SyncResult | null> {
-    if (this.inFlight) return this.inFlight
+    if (this.inFlight) {
+      this.pendingRerun = true
+      return this.inFlight
+    }
     if (!(this.deps.isOnline ?? defaultIsOnline)()) {
       this.setStatus('offline')
       return Promise.resolve(null)
@@ -81,19 +92,29 @@ export class SyncManager {
     this.setStatus('syncing')
     const run = this.run().finally(() => {
       this.inFlight = null
+      this.pendingRerun = false
     })
     this.inFlight = run
     return run
   }
 
   private async run(): Promise<SyncResult | null> {
+    let result = await this.attemptWithRetry()
+    while (this.pendingRerun) {
+      this.pendingRerun = false
+      result = (await this.attemptWithRetry()) ?? result
+    }
+    return result
+  }
+
+  /** 单次尝试;乐观并发冲突时重跑一轮(重新 listFiles + 合并)通常即可收敛 */
+  private async attemptWithRetry(): Promise<SyncResult | null> {
     let err: unknown
     try {
       return await this.attempt()
     } catch (firstErr) {
       err = firstErr
     }
-    // 乐观并发冲突:重跑一轮(重新 listFiles + 合并)通常即可收敛
     if (err instanceof SyncConflictError) {
       try {
         return await this.attempt()
@@ -114,20 +135,28 @@ export class SyncManager {
     return null
   }
 
-  /** 一轮「拉取 → 合并 → 推送」;冲突时由 run() 决定是否重试 */
+  /** 一轮「拉取 → 合并 → 推送」 */
   private async attempt(): Promise<SyncResult> {
     const remoteBefore = await this.deps.endpoint.listFiles()
-    const result = await replay(this.deps.queue, this.deps.ledger, this.deps.endpoint)
 
-    // 首次同步到空远端:远端从未出现过分类文件且本地无分类 → 播种默认分类再推一轮
+    // 首次同步到空远端(从未出现过分类文件)且本地无分类:先播种默认分类再合并推送,
+    // 让家人首次登录就能看到分类。必须在 replay 之前播种:成员端 remote-wins 会在
+    // 合并时采用远端分类文件,若空文件先被推到远端,播种会被清空。
     if (!(CATEGORIES_FILE in remoteBefore) && this.deps.ledger.meta.categories.length === 0) {
       this.deps.ledger.meta.categories = structuredClone(DEFAULT_CATEGORIES)
-      await sync(this.deps.ledger, this.deps.endpoint)
     }
 
+    const result = await replay(this.deps.queue, this.deps.ledger, this.deps.endpoint, {
+      adminFilesPolicy: this.adminFilesPolicy(),
+    })
     await this.deps.onSynced?.(result)
     this.setStatus('synced')
     return result
+  }
+
+  /** 成员端 remote-wins(采纳管理员维护的分类/预算),管理员端 local-wins(保住自己的编辑) */
+  private adminFilesPolicy(): AdminFilesPolicy {
+    return (this.deps.getRole?.() ?? 'admin') === 'admin' ? 'local-wins' : 'remote-wins'
   }
 
   private setStatus(status: SyncStatus, error?: string): void {

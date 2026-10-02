@@ -35,7 +35,18 @@ export async function createSession(
 }
 
 /** 校验请求携带的 Bearer 会话;缺失/无效/过期抛 401 */
-export async function requireAuth(request: Request, secret: string): Promise<JwtPayload> {
+export type MemberDisabledLookup = (memberId: string) => Promise<boolean>
+
+/**
+ * 校验请求携带的 Bearer 会话;缺失/无效/过期抛 401。
+ * 传入 isMemberDisabled 时进一步核对成员当前是否被停用(T9):停用后
+ * 已签发的旧会话立即失效(401 account_disabled),而不只是在登录时拦截。
+ */
+export async function requireAuth(
+  request: Request,
+  secret: string,
+  isMemberDisabled?: MemberDisabledLookup,
+): Promise<JwtPayload> {
   const header = request.headers.get('authorization')
   if (!header?.startsWith('Bearer ')) {
     throw new HttpError(401, 'unauthorized', '缺少会话凭据')
@@ -44,12 +55,19 @@ export async function requireAuth(request: Request, secret: string): Promise<Jwt
   if (!payload) {
     throw new HttpError(401, 'unauthorized', '会话无效或已过期')
   }
+  if (isMemberDisabled && (await isMemberDisabled(payload.sub))) {
+    throw new HttpError(401, 'account_disabled', '该成员已停用')
+  }
   return payload
 }
 
-/** 校验会话且必须是管理员;未认证 401,非管理员 403 */
-export async function requireAdmin(request: Request, secret: string): Promise<JwtPayload> {
-  const payload = await requireAuth(request, secret)
+/** 校验会话且必须是管理员;未认证 401,停用 401,非管理员 403 */
+export async function requireAdmin(
+  request: Request,
+  secret: string,
+  isMemberDisabled?: MemberDisabledLookup,
+): Promise<JwtPayload> {
+  const payload = await requireAuth(request, secret, isMemberDisabled)
   if (payload.role !== 'admin') {
     throw new HttpError(403, 'forbidden', '仅管理员可执行此操作')
   }

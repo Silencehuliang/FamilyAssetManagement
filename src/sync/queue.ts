@@ -1,6 +1,6 @@
 import type { CategoryId, ExpenseId, LedgerData, MonthKey, RecurringId } from '../domain'
 import type { SyncEndpoint } from './endpoint'
-import type { SyncResult } from './engine'
+import type { SyncOptions, SyncResult } from './engine'
 import { pushFiles, sync } from './engine'
 import {
   BUDGETS_FILE,
@@ -112,14 +112,15 @@ function applyDeleteOp(local: LedgerData, op: PendingOp, touched: Set<string>): 
 /**
  * 恢复连接:先跑一轮常规同步(离线期间的增/改经 LWW 合并传播),再按登记顺序
  * 补放删除操作,把受影响文件写回端点(月份清空时删除端点文件),最后清空队列。
- * 队列为空时等价于 sync(local, endpoint)。
+ * 队列为空时等价于 sync(local, endpoint, options);options 透传合并策略(见 engine)。
  */
 export async function replay(
   queue: PendingQueue,
   local: LedgerData,
   endpoint: SyncEndpoint,
+  options: SyncOptions = {},
 ): Promise<SyncResult> {
-  const result = await sync(local, endpoint)
+  const result = await sync(local, endpoint, options)
 
   const ops = [...queue.pending]
   if (ops.length > 0) {

@@ -8,17 +8,41 @@
  * 3. 无会话 → GET /api/members 探测:members_file_missing → 初始化向导,401 → 登录页;
  * 4. 进入主界面后立即跑一轮 replay(queue, local, remote)。
  */
-import type { AuthResult, LedgerApi, LoginInput, SetupInput, StoredSession } from '../api'
+import type {
+  AuthResult,
+  CreateMemberInput,
+  LedgerApi,
+  LoginInput,
+  ResetPasswordInput,
+  SetMemberStatusInput,
+  SetupInput,
+  StoredSession,
+} from '../api'
 import { ApiError } from '../api/client'
 import {
+  addCategory as addCategoryInLedger,
   addExpense,
+  type Category,
+  type CategoryId,
   createEmptyLedger,
+  deleteCategory as deleteCategoryInLedger,
+  deleteExpense as deleteExpenseInLedger,
   type Expense,
+  type ExpenseId,
   type LedgerData,
   type Member,
+  type MonthKey,
+  updateCategory as updateCategoryInLedger,
+  updateExpense as updateExpenseInLedger,
 } from '../domain'
 import { DomainError } from '../domain/types'
-import { buildExpenseInput, type EntryForm, ensureCategories } from '../features/entry'
+import { nextSortOrder } from '../features/categories'
+import {
+  buildExpenseInput,
+  buildExpensePatch,
+  type EntryForm,
+  ensureCategories,
+} from '../features/entry'
 import type { LocalStore } from '../storage'
 import { MemoryLocalStore, PersistentQueue } from '../storage'
 import type { PendingOp, SyncEndpoint } from '../sync'
@@ -27,11 +51,14 @@ import { SyncManager, type SyncStatus } from './sync'
 
 export type AppPhase = 'booting' | 'setup' | 'login' | 'ready'
 
-/** 控制器依赖的 API 面:rest 接口 + 会话读写(ApiClient 结构化满足) */
+/** 控制器依赖的 API 面:rest 接口 + 会话读写 + 成员管理(T9;ApiClient 结构化满足) */
 export interface AppApi extends LedgerApi {
   getSession(): StoredSession | null
   clearSession(): void
   setOnUnauthorized?(handler: () => void): void
+  createMember(input: CreateMemberInput): Promise<Member>
+  setMemberStatus(input: SetMemberStatusInput): Promise<Member>
+  resetMemberPassword(input: ResetPasswordInput): Promise<Member>
 }
 
 export interface AppState {
@@ -128,6 +155,7 @@ export class AppController {
       endpoint: this.deps.endpoint ?? createRemoteEndpoint(this.deps.api),
       queue: this.queue,
       ledger: this.ledger,
+      getRole: () => this.deps.api.getSession()?.member.role,
       isOnline: this.deps.isOnline,
       onStatus: (status, error) => this.setState({ syncStatus: status, syncError: error }),
       onSynced: () => this.persistLedger(),
@@ -200,8 +228,8 @@ export class AppController {
     ensureCategories(this.ledger)
     const actor = this.currentActor()
     const input = buildExpenseInput(this.ledger, form, actor.id)
-    const now = (this.deps.now ?? (() => new Date()))().toISOString()
-    const newId = (this.deps.newId ?? (() => crypto.randomUUID()))()
+    const now = this.nowIso()
+    const newId = this.generateId()
     addExpense(this.ledger, input, { actor, now, newId })
 
     const month = input.date.slice(0, 7)
@@ -211,6 +239,136 @@ export class AppController {
     await this.persistLedger()
     void this.syncManager?.syncNow()
     return created
+  }
+
+  /**
+   * 修改一笔(明细页编辑):领域层校验「管理员/经手人/记录者」权限,
+   * 本地立即生效 → 写穿 IndexedDB → 后台同步(LWW 传播,无需队列)。
+   */
+  async updateExpense(id: ExpenseId, form: EntryForm): Promise<void> {
+    const actor = this.currentActor()
+    const patch = buildExpensePatch(this.ledger, form)
+    updateExpenseInLedger(this.ledger, id, patch, {
+      actor,
+      now: this.nowIso(),
+      newId: this.generateId(),
+    })
+    await this.persistLedger()
+    void this.syncManager?.syncNow()
+  }
+
+  /**
+   * 删除一笔:领域层校验权限后本地删除,并登记离线墓碑(delete-expense),
+   * 由 replay 在同步时补删远端,避免其他设备的旧副本把记录推回来。
+   */
+  async deleteExpense(id: ExpenseId): Promise<void> {
+    const actor = this.currentActor()
+    const month = this.monthOfExpense(id)
+    const now = this.nowIso()
+    deleteExpenseInLedger(this.ledger, id, { actor, now, newId: this.generateId() })
+    this.queue.record({ type: 'delete-expense', id, month, deletedAt: now })
+    await this.persistLedger()
+    void this.syncManager?.syncNow()
+  }
+
+  private monthOfExpense(id: ExpenseId): MonthKey {
+    for (const [month, data] of Object.entries(this.ledger.months)) {
+      if (data.expenses.some((e) => e.id === id)) return month
+    }
+    throw new DomainError('unknown_expense', `支出不存在:${id}`)
+  }
+
+  /**
+   * 新增分类(T8,仅管理员;领域层二次门禁):parentId 缺省为父分类,
+   * 排序位次取同级最大 + 1,写穿本地并触发同步。
+   */
+  async addCategory(input: { name: string; parentId?: CategoryId }): Promise<Category> {
+    const actor = this.currentActor()
+    const name = input.name.trim()
+    if (name === '') throw new DomainError('invalid_name', '请输入分类名称')
+    const id = `cat-${this.generateId()}`
+    addCategoryInLedger(this.ledger, actor, {
+      id,
+      name,
+      parentId: input.parentId,
+      sortOrder: nextSortOrder(this.ledger, input.parentId),
+    })
+    const created = this.ledger.meta.categories.find((c) => c.id === id)
+    if (!created) throw new Error('新增分类后未找到记录')
+    await this.persistLedger()
+    void this.syncManager?.syncNow()
+    return created
+  }
+
+  /** 重命名分类或调整排序(T8,仅管理员) */
+  async updateCategory(
+    id: CategoryId,
+    patch: { name?: string; sortOrder?: number },
+  ): Promise<void> {
+    const actor = this.currentActor()
+    const next = { ...patch }
+    if (patch.name !== undefined) {
+      const name = patch.name.trim()
+      if (name === '') throw new DomainError('invalid_name', '请输入分类名称')
+      next.name = name
+    }
+    updateCategoryInLedger(this.ledger, actor, id, next)
+    await this.persistLedger()
+    void this.syncManager?.syncNow()
+  }
+
+  /**
+   * 删除分类(T8,仅管理员):有支出的子分类必须传 migrateToId(同父子分类),
+   * 支出迁移过去;有子分类的父分类会被领域层拒绝(category_has_children)。
+   * 删除经离线队列登记,防止远端旧分类被合并复活。
+   */
+  async deleteCategory(id: CategoryId, migrateToId?: CategoryId): Promise<void> {
+    const actor = this.currentActor()
+    deleteCategoryInLedger(this.ledger, actor, id, migrateToId)
+    this.queue.record({ type: 'delete-category', id })
+    await this.persistLedger()
+    void this.syncManager?.syncNow()
+  }
+
+  /**
+   * 创建成员(T9,仅管理员):成功后刷新成员列表,记一笔的经手人选择立即更新。
+   */
+  async createMember(input: CreateMemberInput): Promise<Member> {
+    this.assertAdmin()
+    const created = await this.deps.api.createMember(input)
+    await this.refreshMembers(created)
+    return created
+  }
+
+  /**
+   * 停用/启用成员(T9,仅管理员):服务端停用后该成员旧会话的同步与请求随即被拒;
+   * 成功后刷新成员列表(停用成员从经手人选择中消失/恢复)。
+   */
+  async setMemberStatus(memberId: string, disabled: boolean): Promise<Member> {
+    this.assertAdmin()
+    const updated = await this.deps.api.setMemberStatus({ memberId, disabled })
+    await this.refreshMembers(updated)
+    return updated
+  }
+
+  /** 重置成员密码(T9,仅管理员) */
+  async resetMemberPassword(memberId: string, newPassword: string): Promise<void> {
+    this.assertAdmin()
+    await this.deps.api.resetMemberPassword({ memberId, newPassword })
+  }
+
+  private assertAdmin(): void {
+    if (this.state.member?.role !== 'admin') {
+      throw new DomainError('forbidden', '仅管理员可管理成员')
+    }
+  }
+
+  private nowIso(): string {
+    return (this.deps.now ?? (() => new Date()))().toISOString()
+  }
+
+  private generateId(): string {
+    return (this.deps.newId ?? (() => crypto.randomUUID()))()
   }
 
   private currentActor(): Member {

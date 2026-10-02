@@ -437,3 +437,242 @@ body {
   font-variant-numeric: tabular-nums;
   flex-shrink: 0;
 }
+
+/* 明细页(T7) */
+.month-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.month-arrow {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  border-radius: 8px;
+  width: 32px;
+  height: 32px;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.month-row {
+  flex: 1;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.month-row .chip {
+  white-space: nowrap;
+}
+
+/* 有数据的月份加粗边框提示,当前选中态由 chip-active 表达 */
+.month-has-data {
+  border-color: var(--brand);
+}
+
+.month-total {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-top: 12px;
+}
+
+.month-total-value {
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+}
+
+.day-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  font-size: 13px;
+  color: var(--text-dim);
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.day-total {
+  font-variant-numeric: tabular-nums;
+}
+
+.entry-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.entry-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+}
+
+.entry-item:first-child {
+  border-top: 0;
+  padding-top: 8px;
+}
+
+.entry-main {
+  appearance: none;
+  border: 0;
+  background: none;
+  color: inherit;
+  padding: 0;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+  cursor: pointer;
+}
+
+.entry-main:disabled {
+  opacity: 1;
+  cursor: default;
+}
+
+.entry-category {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.entry-meta {
+  font-size: 12px;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.entry-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.entry-tag {
+  font-size: 11px;
+  color: var(--brand);
+  background: var(--brand-dim);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+.entry-amount {
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+/* 编辑弹层 */
+.sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  z-index: 20;
+  padding: 16px;
+}
+
+.sheet {
+  width: 100%;
+  max-width: 520px;
+  max-height: 88vh;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 16px;
+}
+
+.sheet-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.sheet-close {
+  width: auto;
+  margin-top: 0;
+  font-size: 13px;
+}
+
+.sheet .card {
+  border: 0;
+  padding: 0;
+  background: none;
+}
+
+/* 分类管理(T8) */
+.back-button {
+  width: auto;
+  margin-top: 0;
+  text-align: left;
+  padding: 0;
+}
+
+.category-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.category-name {
+  font-size: 15px;
+}
+
+.row-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.text-button {
+  appearance: none;
+  border: 0;
+  background: none;
+  color: var(--brand);
+  font-size: 13px;
+  padding: 0;
+  cursor: pointer;
+}
+
+.text-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.danger-text {
+  color: #dc2626;
+}
+
+.category-children {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+}
+
+.category-child-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+  font-size: 14px;
+}

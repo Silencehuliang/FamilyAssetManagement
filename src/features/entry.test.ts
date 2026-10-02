@@ -10,6 +10,7 @@ import {
 } from '../domain/fixtures'
 import {
   buildExpenseInput,
+  buildExpensePatch,
   type EntryForm,
   ensureCategories,
   formatCents,
@@ -142,6 +143,26 @@ describe('buildExpenseInput(表单 → 领域输入)', () => {
     expect(() => buildExpenseInput(ledger, form({ date: '2026/10/02' }), XIAOHONG.id)).toThrow(
       /日期/,
     )
+  })
+})
+
+describe('buildExpensePatch(表单 → 更新补丁,明细页编辑)', () => {
+  it('备注清空传 null,非空传去除首尾空白的文本', () => {
+    const ledger = fixtureLedger()
+    expect(buildExpensePatch(ledger, form({ note: '   ' })).note).toBeNull()
+    expect(buildExpensePatch(ledger, form({ note: ' 新备注 ' })).note).toBe('新备注')
+  })
+
+  it('空经手人表示保持原值(undefined),显式经手人进入补丁', () => {
+    const ledger = fixtureLedger()
+    expect(buildExpensePatch(ledger, form({ memberId: '' })).memberId).toBeUndefined()
+    expect(buildExpensePatch(ledger, form({ memberId: ADMIN.id })).memberId).toBe(ADMIN.id)
+  })
+
+  it('与新增共用校验:父分类/非法金额被拒', () => {
+    const ledger = fixtureLedger()
+    expect(() => buildExpensePatch(ledger, form({ categoryId: 'cat-dining' }))).toThrow(/子分类/)
+    expect(() => buildExpensePatch(ledger, form({ amountText: '0' }))).toThrow(/金额/)
   })
 })
 

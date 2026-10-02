@@ -28,7 +28,8 @@ export interface ExpensePatch {
   tagNames?: string[]
   /** 修正经手人(记错代记对象时) */
   memberId?: MemberId
-  note?: string
+  /** 传 null 清除备注;缺省表示不改动 */
+  note?: string | null
 }
 
 export interface MutationContext {
@@ -154,7 +155,7 @@ export function updateExpense(
   if (patch.categoryId !== undefined) next.categoryId = patch.categoryId
   if (patch.tagNames !== undefined) next.tagNames = [...patch.tagNames]
   if (patch.memberId !== undefined) next.memberId = patch.memberId
-  if (patch.note !== undefined) next.note = patch.note
+  if (patch.note !== undefined) next.note = patch.note === null ? undefined : patch.note
   validateForWrite(ledger, next)
 
   const list = monthData(ledger, month).expenses

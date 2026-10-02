@@ -67,12 +67,14 @@ export function updateCategory(
 /**
  * 删除分类。删除仍有支出归属的子分类时,必须提供 migrateToId(同父下的另一个子分类),
  * 该子分类名下的全部支出将迁移过去;父分类必须先删除/迁走其子分类。
+ * 迁移会刷新支出的 updatedAt(LWW 需要新时间戳才能把迁移传播到其他设备)。
  */
 export function deleteCategory(
   ledger: LedgerData,
   actor: Member,
   id: CategoryId,
   migrateToId?: CategoryId,
+  now: string = new Date().toISOString(),
 ): LedgerData {
   requireAdmin(actor)
   const category = findCategory(ledger, id)
@@ -91,7 +93,7 @@ export function deleteCategory(
         if (month.expenses.some((e) => e.categoryId === id)) {
           ledger.months[monthKey] = {
             expenses: month.expenses.map((e) =>
-              e.categoryId === id ? { ...e, categoryId: migrateToId } : e,
+              e.categoryId === id ? { ...e, categoryId: migrateToId, updatedAt: now } : e,
             ),
           }
         }

@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import type { AuthResult, LoginInput, SetupInput, StoredSession } from '../api'
+import type {
+  AuthResult,
+  CreateMemberInput,
+  LoginInput,
+  ResetPasswordInput,
+  SetMemberStatusInput,
+  SetupInput,
+  StoredSession,
+} from '../api'
 import { ApiError } from '../api/client'
-import type { Member } from '../domain'
+import { addExpense, type Member } from '../domain'
 import { ADMIN, NOW, XIAOHONG } from '../domain/fixtures'
 import { MemoryLocalStore } from '../storage'
 import { InMemoryEndpoint } from '../sync'
@@ -19,6 +27,11 @@ class FakeApi implements AppApi {
   setupCalls = 0
   loginCalls = 0
   unauthorizedHandler: (() => void) | undefined
+  createMemberError: unknown = null
+  statusError: unknown = null
+  resetPasswordError: unknown = null
+  readonly statusCalls: SetMemberStatusInput[] = []
+  readonly resetCalls: ResetPasswordInput[] = []
 
   getSession(): StoredSession | null {
     return this.session
@@ -30,6 +43,37 @@ class FakeApi implements AppApi {
 
   setOnUnauthorized(handler: () => void): void {
     this.unauthorizedHandler = handler
+  }
+
+  async createMember(input: CreateMemberInput): Promise<Member> {
+    if (this.createMemberError) throw this.createMemberError
+    const member: Member = {
+      id: `id-${input.username}`,
+      username: input.username,
+      displayName: input.displayName,
+      role: input.role ?? 'member',
+      disabled: false,
+      createdAt: NOW,
+    }
+    this.members = [...this.members, member]
+    return member
+  }
+
+  async setMemberStatus(input: SetMemberStatusInput): Promise<Member> {
+    if (this.statusError) throw this.statusError
+    this.statusCalls.push({ ...input })
+    this.members = this.members.map((m) =>
+      m.id === input.memberId ? { ...m, disabled: input.disabled } : m,
+    )
+    const updated = this.members.find((m) => m.id === input.memberId)
+    if (!updated) throw new ApiError(404, 'member_not_found', '成员不存在')
+    return updated
+  }
+
+  async resetMemberPassword(input: ResetPasswordInput): Promise<Member> {
+    if (this.resetPasswordError) throw this.resetPasswordError
+    this.resetCalls.push({ ...input })
+    return this.members.find((m) => m.id === input.memberId) ?? XIAOHONG
   }
 
   async setup(input: SetupInput): Promise<AuthResult> {
@@ -349,5 +393,296 @@ describe('AppController 记一笔(T6)', () => {
 
     expect(expense.categoryId).toBe('cat-dining-2')
     expect(controller.getLedger().meta.categories.length).toBeGreaterThan(0)
+  })
+})
+
+describe('AppController 明细页编辑与删除(T7)', () => {
+  const baseForm = {
+    amountText: '12.5',
+    parentId: 'cat-dining',
+    categoryId: 'cat-dining-2',
+    date: '2026-10-02',
+    note: ' 食堂 ',
+    tagsText: '微信',
+    memberId: '',
+  }
+
+  async function readyController(actor: Member = ADMIN) {
+    const api = new FakeApi()
+    api.session = sessionOf(actor)
+    api.members = [ADMIN, XIAOHONG]
+    const made = makeController({
+      api,
+      now: () => new Date('2026-10-02T08:30:00.000Z'),
+      newId: () => 'e-fixed',
+    })
+    await made.controller.boot()
+    return made
+  }
+
+  it('updateExpense:补丁本地生效、写穿存储并同步到端点', async () => {
+    const { controller, store, endpoint } = await readyController()
+    await controller.recordExpense(baseForm)
+
+    await controller.updateExpense('e-fixed', {
+      ...baseForm,
+      amountText: '20',
+      categoryId: 'cat-dining-3',
+      note: '',
+      tagsText: '',
+      memberId: XIAOHONG.id,
+    })
+
+    const updated = controller.getLedger().months['2026-10']?.expenses[0]
+    expect(updated).toMatchObject({
+      amountCents: 2000,
+      categoryId: 'cat-dining-3',
+      memberId: XIAOHONG.id,
+      recordedBy: ADMIN.id,
+      tagNames: [],
+    })
+    expect(updated?.note).toBeUndefined()
+    expect((await store.loadLedger())?.months['2026-10']?.expenses[0]?.amountCents).toBe(2000)
+
+    await controller.retrySync()
+    const files = await endpoint.listFiles()
+    expect(files['ledger/months/2026-10.json']?.content).toContain('"amountCents": 2000')
+  })
+
+  it('updateExpense:改他人的记录被领域层拒绝,记录保持原样', async () => {
+    const { controller } = await readyController(XIAOHONG)
+    const ledger = controller.getLedger()
+    addExpense(
+      ledger,
+      { amountCents: 500, date: '2026-10-02', categoryId: 'cat-dining-2' },
+      { actor: ADMIN, now: NOW, newId: 'e-other' },
+    )
+
+    await expect(
+      controller.updateExpense('e-other', { ...baseForm, amountText: '99' }),
+    ).rejects.toThrow(/只能修改/)
+    expect(ledger.months['2026-10']?.expenses[0]?.amountCents).toBe(500)
+  })
+
+  it('deleteExpense:本地删除 + 登记墓碑,同步后远端月份文件消失、队列清空', async () => {
+    const { controller, store, endpoint } = await readyController()
+    await controller.recordExpense(baseForm)
+    await controller.retrySync()
+    expect((await endpoint.listFiles())['ledger/months/2026-10.json']).toBeDefined()
+
+    await controller.deleteExpense('e-fixed')
+
+    expect(controller.getLedger().months['2026-10']).toBeUndefined()
+    expect((await store.loadLedger())?.months['2026-10']).toBeUndefined()
+    await expect(store.loadQueueOps()).resolves.toEqual([
+      {
+        type: 'delete-expense',
+        id: 'e-fixed',
+        month: '2026-10',
+        deletedAt: '2026-10-02T08:30:00.000Z',
+      },
+    ])
+
+    await controller.retrySync()
+    expect((await endpoint.listFiles())['ledger/months/2026-10.json']).toBeUndefined()
+    await expect(store.loadQueueOps()).resolves.toEqual([])
+  })
+
+  it('deleteExpense:删除他人的记录被拒绝,记录保留', async () => {
+    const { controller, store } = await readyController(XIAOHONG)
+    const ledger = controller.getLedger()
+    addExpense(
+      ledger,
+      { amountCents: 500, date: '2026-10-02', categoryId: 'cat-dining-2' },
+      { actor: ADMIN, now: NOW, newId: 'e-other' },
+    )
+
+    await expect(controller.deleteExpense('e-other')).rejects.toThrow(/只能修改/)
+    expect(ledger.months['2026-10']?.expenses).toHaveLength(1)
+    await expect(store.loadQueueOps()).resolves.toEqual([])
+  })
+})
+
+describe('AppController 分类管理(T8)', () => {
+  async function readyController(actor: Member = ADMIN) {
+    const api = new FakeApi()
+    api.session = sessionOf(actor)
+    api.members = [ADMIN, XIAOHONG]
+    const made = makeController({
+      api,
+      now: () => new Date('2026-10-02T08:30:00.000Z'),
+    })
+    await made.controller.boot()
+    return made
+  }
+
+  it('管理员:新增父/子分类、重命名,写穿本地并同步到端点', async () => {
+    const { controller, store, endpoint } = await readyController()
+
+    const parent = await controller.addCategory({ name: ' 咖啡 ' })
+    expect(parent).toMatchObject({ name: '咖啡', sortOrder: 10 }) // 预设 10 个父分类
+    expect(parent.parentId).toBeUndefined()
+
+    const child = await controller.addCategory({ name: '咖啡豆', parentId: parent.id })
+    expect(child).toMatchObject({ name: '咖啡豆', parentId: parent.id, sortOrder: 0 })
+
+    await controller.updateCategory(child.id, { name: '手冲' })
+    expect(controller.getLedger().meta.categories.find((c) => c.id === child.id)?.name).toBe('手冲')
+
+    await controller.retrySync()
+    const files = await endpoint.listFiles()
+    expect(files['ledger/meta/categories.json']?.content).toContain('手冲')
+    expect((await store.loadLedger())?.meta.categories.find((c) => c.id === parent.id)?.name).toBe(
+      '咖啡',
+    )
+  })
+
+  it('删除有支出的子分类:未指定迁移目标被拒;指定同父子分类后支出迁移并登记墓碑', async () => {
+    const { controller, store } = await readyController()
+    await controller.recordExpense({
+      amountText: '12',
+      parentId: 'cat-dining',
+      categoryId: 'cat-dining-2',
+      date: '2026-10-02',
+      note: '',
+      tagsText: '',
+      memberId: '',
+    })
+
+    await expect(controller.deleteCategory('cat-dining-2')).rejects.toMatchObject({
+      code: 'category_in_use',
+    })
+    expect(controller.getLedger().meta.categories.some((c) => c.id === 'cat-dining-2')).toBe(true)
+
+    await controller.deleteCategory('cat-dining-2', 'cat-dining-3')
+
+    expect(controller.getLedger().meta.categories.some((c) => c.id === 'cat-dining-2')).toBe(false)
+    expect(controller.getLedger().months['2026-10']?.expenses[0]?.categoryId).toBe('cat-dining-3')
+    await expect(store.loadQueueOps()).resolves.toEqual([
+      { type: 'delete-category', id: 'cat-dining-2' },
+    ])
+  })
+
+  it('删除有子分类的父分类被拒(category_has_children),账本不变', async () => {
+    const { controller } = await readyController()
+
+    await expect(controller.deleteCategory('cat-dining')).rejects.toMatchObject({
+      code: 'category_has_children',
+    })
+    expect(controller.getLedger().meta.categories.some((c) => c.id === 'cat-dining')).toBe(true)
+  })
+
+  it('同级重名被拒(category_duplicated)', async () => {
+    const { controller } = await readyController()
+    const parent = await controller.addCategory({ name: '咖啡' })
+
+    await expect(controller.addCategory({ name: '咖啡' })).rejects.toMatchObject({
+      code: 'category_duplicated',
+    })
+    await controller.addCategory({ name: '拿铁', parentId: parent.id })
+    await expect(
+      controller.addCategory({ name: '拿铁', parentId: parent.id }),
+    ).rejects.toMatchObject({ code: 'category_duplicated' })
+    // 不同父下可同名
+    await expect(
+      controller.addCategory({ name: '拿铁', parentId: 'cat-dining' }),
+    ).resolves.toMatchObject({ name: '拿铁' })
+  })
+
+  it('普通成员:分类写操作被领域层拒绝,账本与队列不变', async () => {
+    const { controller, store } = await readyController(XIAOHONG)
+
+    await expect(controller.addCategory({ name: '咖啡' })).rejects.toThrow(/仅管理员/)
+    await expect(controller.updateCategory('cat-dining', { name: '吃饭' })).rejects.toThrow(
+      /仅管理员/,
+    )
+    await expect(controller.deleteCategory('cat-dining-2')).rejects.toThrow(/仅管理员/)
+    expect(controller.getLedger().meta.categories.some((c) => c.name === '咖啡')).toBe(false)
+    await expect(store.loadQueueOps()).resolves.toEqual([])
+  })
+})
+
+describe('AppController 成员管理(T9)', () => {
+  async function readyController(actor: Member = ADMIN) {
+    const api = new FakeApi()
+    api.session = sessionOf(actor)
+    api.members = [ADMIN, XIAOHONG]
+    const made = makeController({ api })
+    await made.controller.boot()
+    return { ...made, api }
+  }
+
+  it('管理员创建成员:返回公开成员并刷新列表(记一笔经手人可见)', async () => {
+    const { controller, api } = await readyController()
+
+    const created = await controller.createMember({
+      username: 'dali',
+      displayName: '大力',
+      password: 'pw-123456',
+    })
+
+    expect(created).toMatchObject({
+      id: 'id-dali',
+      username: 'dali',
+      displayName: '大力',
+      role: 'member',
+      disabled: false,
+    })
+    expect(created).not.toHaveProperty('passwordHash')
+    expect(controller.getState().members.map((m) => m.username)).toEqual([
+      'aming',
+      'xiaohong',
+      'dali',
+    ])
+    expect(api.members.some((m) => m.username === 'dali')).toBe(true)
+  })
+
+  it('管理员可按角色创建;停用/启用成员后列表状态同步刷新', async () => {
+    const { controller, api } = await readyController()
+    const created = await controller.createMember({
+      username: 'guanli',
+      displayName: '管理二号',
+      password: 'pw-123456',
+      role: 'admin',
+    })
+    expect(created.role).toBe('admin')
+
+    const disabled = await controller.setMemberStatus(created.id, true)
+    expect(disabled.disabled).toBe(true)
+    expect(controller.getState().members.find((m) => m.id === created.id)?.disabled).toBe(true)
+    expect(api.statusCalls).toEqual([{ memberId: created.id, disabled: true }])
+
+    await controller.setMemberStatus(created.id, false)
+    expect(controller.getState().members.find((m) => m.id === created.id)?.disabled).toBe(false)
+  })
+
+  it('重置密码透传 memberId 与新密码', async () => {
+    const { controller, api } = await readyController()
+
+    await controller.resetMemberPassword(XIAOHONG.id, 'new-pw-123')
+
+    expect(api.resetCalls).toEqual([{ memberId: XIAOHONG.id, newPassword: 'new-pw-123' }])
+  })
+
+  it('普通成员调用成员管理被拒(forbidden),不触达 API', async () => {
+    const { controller, api } = await readyController(XIAOHONG)
+
+    await expect(
+      controller.createMember({ username: 'dali', displayName: '大力', password: 'pw-123456' }),
+    ).rejects.toThrow(/仅管理员/)
+    await expect(controller.setMemberStatus(ADMIN.id, true)).rejects.toThrow(/仅管理员/)
+    await expect(controller.resetMemberPassword(ADMIN.id, 'pw-123456')).rejects.toThrow(/仅管理员/)
+    expect(api.statusCalls).toEqual([])
+    expect(api.resetCalls).toEqual([])
+    expect(api.members.some((m) => m.username === 'dali')).toBe(false)
+  })
+
+  it('服务端错误(如用户名重复 409)原样抛出', async () => {
+    const { controller, api } = await readyController()
+    api.createMemberError = new ApiError(409, 'member_duplicated', '用户名已存在')
+
+    await expect(
+      controller.createMember({ username: 'aming', displayName: '重复', password: 'pw-123456' }),
+    ).rejects.toMatchObject({ status: 409, code: 'member_duplicated' })
   })
 })
