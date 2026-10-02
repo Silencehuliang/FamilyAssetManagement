@@ -1,0 +1,23 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+dev-dist/
+
+# test coverage
+coverage/
+
+# env & secrets
+.env
+.env.*
+!.env.example
+.dev.vars
+
+# wrangler local state
+.wrangler/
+
+# editor & OS
+.DS_Store
+Thumbs.db
+*.local
