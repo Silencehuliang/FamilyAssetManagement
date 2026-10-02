@@ -124,6 +124,10 @@ export async function putFile(
     headers: requestHeaders(token, { 'Content-Type': 'application/json' }),
     body: JSON.stringify(body),
   })
+  // 422 = 无 sha 时文件已存在(首次创建竞态),或 sha 过期(乐观并发冲突)
+  if (response.status === 422) {
+    throw new HttpError(409, 'file_conflict', '远端文件状态已变化,请刷新后重试')
+  }
   await assertOk(response, false)
   const data = (await response.json()) as { content?: { sha?: string } }
   const newSha = data.content?.sha

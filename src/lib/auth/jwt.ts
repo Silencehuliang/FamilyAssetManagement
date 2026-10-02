@@ -57,8 +57,12 @@ export async function signJwt(payload: JwtPayload, secret: string): Promise<stri
   return `${unsigned}.${bytesToBase64Url(new Uint8Array(signature))}`
 }
 
-/** 校验签名与过期时间;任何失败返回 null */
-export async function verifyJwt(token: string, secret: string): Promise<JwtPayload | null> {
+/** 校验签名与过期时间;任何失败返回 null。now 可注入以便测试过期行为 */
+export async function verifyJwt(
+  token: string,
+  secret: string,
+  now: () => number = Date.now,
+): Promise<JwtPayload | null> {
   const parts = token.split('.')
   if (parts.length !== 3) {
     return null
@@ -83,11 +87,7 @@ export async function verifyJwt(token: string, secret: string): Promise<JwtPaylo
       return null
     }
     const payload = JSON.parse(decoder.decode(base64UrlToBytes(payloadPart))) as Partial<JwtPayload>
-    if (
-      !isPayload(payload) ||
-      typeof payload.exp !== 'number' ||
-      payload.exp * 1000 <= Date.now()
-    ) {
+    if (!isPayload(payload) || typeof payload.exp !== 'number' || payload.exp * 1000 <= now()) {
       return null
     }
     return payload

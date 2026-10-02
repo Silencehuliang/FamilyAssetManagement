@@ -2,12 +2,18 @@
  * 账本文件读写代理(ADR-0002/0004/0005):
  * - 路径必须位于 ledger/ 之下,越界一律 400;
  * - 读取对所有已认证成员开放;
- * - 写入 members.json 仅限管理员(成员即账户的凭据不得被普通成员改写)。
+ * - 写入仅限:支出月度文件与周期规则(所有成员)、分类/预算/成员元数据(仅管理员)。
  */
 import type { JwtPayload } from './auth/jwt'
-import { MEMBERS_FILE } from './auth/members'
+import { MEMBERS_FILE, parseMembers } from './auth/members'
 import type { LedgerStore } from './github'
 import { HttpError } from './http'
+
+const ADMIN_ONLY_FILES = new Set([
+  MEMBERS_FILE,
+  'ledger/meta/categories.json',
+  'ledger/meta/budgets.json',
+])
 
 export function validateLedgerPath(path: unknown): string {
   if (
@@ -45,8 +51,15 @@ export async function writeLedgerFile(
   input: WriteLedgerInput,
 ): Promise<{ sha: string }> {
   const path = validateLedgerPath(input.path)
-  if (path === MEMBERS_FILE && session.role !== 'admin') {
-    throw new HttpError(403, 'forbidden', '仅管理员可修改成员数据')
+  if (ADMIN_ONLY_FILES.has(path) && session.role !== 'admin') {
+    throw new HttpError(403, 'forbidden', '仅管理员可修改该元数据')
+  }
+  if (path === MEMBERS_FILE) {
+    try {
+      parseMembers(input.content)
+    } catch {
+      throw new HttpError(400, 'invalid_members', 'members.json 内容不合法,拒绝写入')
+    }
   }
   return { sha: await store.putFile(path, input.content, input.sha) }
 }

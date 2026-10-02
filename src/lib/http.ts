@@ -47,7 +47,7 @@ export function requireString(value: unknown, field: string): string {
   if (typeof value !== 'string' || value.trim() === '') {
     throw new HttpError(400, 'invalid_request', `${field} 不能为空`)
   }
-  return value
+  return value.trim()
 }
 
 export function optionalString(value: unknown): string | undefined {

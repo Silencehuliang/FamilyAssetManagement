@@ -85,3 +85,13 @@ describe('createSession', () => {
     })
   })
 })
+
+describe('verifyJwt 可注入时钟', () => {
+  it('注入过期后的时钟返回 null,注入未过期的时钟返回载荷', async () => {
+    const iat = 1_700_000_000
+    const exp = iat + 60
+    const token = await signJwt({ sub: 'm-1', role: 'member', name: '测试', iat, exp }, SECRET)
+    expect(await verifyJwt(token, SECRET, () => (exp - 1) * 1000)).toMatchObject({ sub: 'm-1' })
+    expect(await verifyJwt(token, SECRET, () => (exp + 1) * 1000)).toBeNull()
+  })
+})

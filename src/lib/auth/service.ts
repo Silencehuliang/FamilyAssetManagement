@@ -84,7 +84,15 @@ export async function initialize(deps: AuthDeps, input: InitializeInput): Promis
     createdAt: now().toISOString(),
     ...credential,
   }
-  await deps.store.putFile(MEMBERS_FILE, serializeMembers([record]))
+  try {
+    await deps.store.putFile(MEMBERS_FILE, serializeMembers([record]))
+  } catch (err) {
+    // 并发初始化竞态:GitHub 对已存在文件的裸 PUT 返回 422 → 409
+    if (err instanceof HttpError && err.code === 'file_conflict') {
+      throw new HttpError(409, 'setup_already_done', '账本已完成初始化')
+    }
+    throw err
+  }
   const member = toPublicMember(record)
   return { token: await createSession(record, deps.secret, now()), member }
 }

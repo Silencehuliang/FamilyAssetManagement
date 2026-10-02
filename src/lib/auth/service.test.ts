@@ -237,3 +237,17 @@ describe('HttpError 契约', () => {
     expect(err.status).toBe(404)
   })
 })
+
+describe('initialize 并发竞态', () => {
+  it('GitHub 端文件冲突(file_conflict)映射为 409 setup_already_done', async () => {
+    const store = new MemoryStore()
+    store.putFile = () => Promise.reject(new HttpError(409, 'file_conflict', '远端文件状态已变化'))
+    await expect(
+      initialize(makeDeps(store), {
+        username: 'admin',
+        displayName: '管理员',
+        password: 'secret-123',
+      }),
+    ).rejects.toMatchObject({ status: 409, code: 'setup_already_done' })
+  })
+})

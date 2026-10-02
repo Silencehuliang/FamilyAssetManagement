@@ -125,3 +125,44 @@ describe('writeLedgerFile(代理写入)', () => {
     expect(store.writes).toHaveLength(0)
   })
 })
+
+describe('元数据写入的角色矩阵与内容校验', () => {
+  it('分类/预算元数据仅管理员可写,月度支出文件所有成员可写', async () => {
+    const store = new MemoryStore()
+    await expect(
+      writeLedgerFile(store, session('member'), {
+        path: 'ledger/meta/categories.json',
+        content: '{"categories":[]}',
+      }),
+    ).rejects.toMatchObject({ status: 403, code: 'forbidden' })
+    await expect(
+      writeLedgerFile(store, session('member'), {
+        path: 'ledger/meta/budgets.json',
+        content: '{"budgets":{}}',
+      }),
+    ).rejects.toMatchObject({ status: 403 })
+    await expect(
+      writeLedgerFile(store, session('member'), {
+        path: 'ledger/months/2026-10.json',
+        content: '{"expenses":[]}',
+      }),
+    ).resolves.toMatchObject({ sha: expect.any(String) })
+  })
+
+  it('members.json 内容不合法时拒绝写入(400),合法时放行', async () => {
+    const store = new MemoryStore()
+    await expect(
+      writeLedgerFile(store, session('admin'), {
+        path: 'ledger/meta/members.json',
+        content: 'not json at all',
+      }),
+    ).rejects.toMatchObject({ status: 400, code: 'invalid_members' })
+    expect(store.writes).toHaveLength(0)
+    await expect(
+      writeLedgerFile(store, session('admin'), {
+        path: 'ledger/meta/members.json',
+        content: '{"members":[]}',
+      }),
+    ).resolves.toMatchObject({ sha: expect.any(String) })
+  })
+})
