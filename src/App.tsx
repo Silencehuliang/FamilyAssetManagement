@@ -9,6 +9,7 @@ import { MembersPage } from './pages/MembersPage'
 import { MePage } from './pages/MePage'
 import { PlaceholderPage } from './pages/PlaceholderPage'
 import { SetupPage } from './pages/SetupPage'
+import { StatsPage } from './pages/StatsPage'
 import type { AppState } from './state/app-controller'
 import { appController } from './state/runtime'
 import { useAppState } from './state/use-app'
@@ -125,7 +126,7 @@ function Shell({ state }: { state: AppState }) {
           <>
             {tab === 'add' ? <AddExpensePage controller={appController} state={state} /> : null}
             {tab === 'entries' ? <EntriesPage controller={appController} state={state} /> : null}
-            {tab === 'stats' ? <PlaceholderPage title="统计报表" note="T10 交付" /> : null}
+            {tab === 'stats' ? <StatsPage state={state} /> : null}
             {tab === 'budget' ? <PlaceholderPage title="预算管理" note="T11 交付" /> : null}
             {tab === 'me' ? (
               <MePage
