@@ -65,6 +65,12 @@ export interface ResetPasswordInput {
   newPassword: string
 }
 
+/** 修改自己的密码(T13);服务端校验当前密码,错误时返回 401 wrong_password */
+export interface ChangePasswordInput {
+  currentPassword: string
+  newPassword: string
+}
+
 /** 服务端账本文件形态:revision 即 GitHub blob sha */
 export interface LedgerFilePayload {
   content: string
@@ -96,6 +102,11 @@ export interface ApiClientOptions {
 interface RequestOptions extends RequestInit {
   /** 默认 true;初始化探测需要显式关闭 */
   auth?: boolean
+  /**
+   * 401 时不清空本地会话(默认 false)。仅用于「当前密码错误」这类
+   * 业务性 401:它不代表会话失效,不应把用户踢回登录页。
+   */
+  keepSession?: boolean
 }
 
 export class ApiClient implements LedgerApi {
@@ -188,6 +199,16 @@ export class ApiClient implements LedgerApi {
     return body.member
   }
 
+  /** 修改自己的密码(T13);当前密码错误(401 wrong_password)不清会话 */
+  async changePassword(input: ChangePasswordInput): Promise<Member> {
+    const body = await this.request<{ member: Member }>('/api/auth/password', {
+      method: 'POST',
+      body: JSON.stringify(input),
+      keepSession: true,
+    })
+    return body.member
+  }
+
   async listLedgerFiles(): Promise<Record<string, LedgerFilePayload>> {
     const body = await this.request<{ files: Record<string, LedgerFilePayload> }>(
       '/api/ledger/list',
@@ -245,7 +266,7 @@ export class ApiClient implements LedgerApi {
   }
 
   private async request<T>(path: string, options: RequestOptions = {}): Promise<T> {
-    const { auth = true, headers, ...init } = options
+    const { auth = true, keepSession = false, headers, ...init } = options
     const finalHeaders = new Headers(headers)
     if (init.body !== undefined && !finalHeaders.has('Content-Type')) {
       finalHeaders.set('Content-Type', 'application/json')
@@ -267,7 +288,7 @@ export class ApiClient implements LedgerApi {
       const message =
         typeof body?.message === 'string' ? body.message : `请求失败(${response.status})`
       // 仅对携带会话的已认证请求按「会话过期」处理;未登录探针的 401 不清理会话、不触发过期提示
-      if (response.status === 401 && auth && this.session) {
+      if (response.status === 401 && auth && this.session && !keepSession) {
         this.clearSession()
         this.onUnauthorized()
       }

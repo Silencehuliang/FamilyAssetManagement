@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type {
   AuthResult,
+  ChangePasswordInput,
   CreateMemberInput,
   LoginInput,
   ResetPasswordInput,
@@ -30,8 +31,10 @@ class FakeApi implements AppApi {
   createMemberError: unknown = null
   statusError: unknown = null
   resetPasswordError: unknown = null
+  changePasswordError: unknown = null
   readonly statusCalls: SetMemberStatusInput[] = []
   readonly resetCalls: ResetPasswordInput[] = []
+  readonly changePasswordCalls: ChangePasswordInput[] = []
 
   getSession(): StoredSession | null {
     return this.session
@@ -74,6 +77,12 @@ class FakeApi implements AppApi {
     if (this.resetPasswordError) throw this.resetPasswordError
     this.resetCalls.push({ ...input })
     return this.members.find((m) => m.id === input.memberId) ?? XIAOHONG
+  }
+
+  async changePassword(input: ChangePasswordInput): Promise<Member> {
+    if (this.changePasswordError) throw this.changePasswordError
+    this.changePasswordCalls.push({ ...input })
+    return this.session?.member ?? XIAOHONG
   }
 
   async setup(input: SetupInput): Promise<AuthResult> {
@@ -907,5 +916,27 @@ describe('AppController 成员管理(T9)', () => {
     await expect(
       controller.createMember({ username: 'aming', displayName: '重复', password: 'pw-123456' }),
     ).rejects.toMatchObject({ status: 409, code: 'member_duplicated' })
+  })
+})
+
+describe('AppController 修改密码(T13)', () => {
+  it('登录成员透传当前密码与新密码;服务端错误原样抛出', async () => {
+    const api = new FakeApi()
+    api.session = sessionOf(ADMIN)
+    api.members = [ADMIN, XIAOHONG]
+    const { controller } = makeController({ api })
+    await controller.boot()
+
+    await controller.changePassword('old-pw', 'new-pw-123')
+    expect(api.changePasswordCalls).toEqual([
+      { currentPassword: 'old-pw', newPassword: 'new-pw-123' },
+    ])
+
+    api.changePasswordError = new ApiError(401, 'wrong_password', '当前密码错误')
+    await expect(controller.changePassword('bad', 'new-pw-123')).rejects.toMatchObject({
+      status: 401,
+      code: 'wrong_password',
+    })
+    expect(controller.getState().phase).toBe('ready')
   })
 })

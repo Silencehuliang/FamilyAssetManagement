@@ -10,6 +10,7 @@
  */
 import type {
   AuthResult,
+  ChangePasswordInput,
   CreateMemberInput,
   LedgerApi,
   LoginInput,
@@ -72,6 +73,7 @@ export interface AppApi extends LedgerApi {
   createMember(input: CreateMemberInput): Promise<Member>
   setMemberStatus(input: SetMemberStatusInput): Promise<Member>
   resetMemberPassword(input: ResetPasswordInput): Promise<Member>
+  changePassword(input: ChangePasswordInput): Promise<Member>
 }
 
 export interface AppState {
@@ -445,6 +447,15 @@ export class AppController {
   async resetMemberPassword(memberId: string, newPassword: string): Promise<void> {
     this.assertAdmin()
     await this.deps.api.resetMemberPassword({ memberId, newPassword })
+  }
+
+  /**
+   * 修改自己的密码(T13):当前密码由服务端校验(错误时抛 401 wrong_password,
+   * 客户端保留了会话);成功后旧密码即失效,当前会话不受影响。
+   */
+  async changePassword(currentPassword: string, newPassword: string): Promise<void> {
+    if (!this.state.member) throw new DomainError('unauthorized', '未登录')
+    await this.deps.api.changePassword({ currentPassword, newPassword })
   }
 
   private assertAdmin(): void {

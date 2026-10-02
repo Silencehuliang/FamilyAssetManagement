@@ -242,6 +242,46 @@ describe('ApiClient.probeInitialization', () => {
   })
 })
 
+describe('ApiClient.changePassword', () => {
+  it('提交当前密码与新密码,返回更新后的成员并附带会话', async () => {
+    const storage = memoryStorage()
+    storage.setItem('fl.session', JSON.stringify(sessionFixture()))
+    const { impl, calls } = fakeFetch(() => jsonResponse({ member: ADA }))
+    const client = new ApiClient({ baseUrl: BASE, fetchImpl: impl, storage })
+
+    await expect(
+      client.changePassword({ currentPassword: 'old-pw', newPassword: 'new-pw' }),
+    ).resolves.toEqual(ADA)
+    expect(calls[0]).toMatchObject({ method: 'POST', url: `${BASE}/api/auth/password` })
+    expect(calls[0]?.body).toEqual({ currentPassword: 'old-pw', newPassword: 'new-pw' })
+    expect(calls[0]?.headers.get('Authorization')).toBe('Bearer jwt-token-1')
+  })
+
+  it('当前密码错误(401 wrong_password)不清会话、不触发 onUnauthorized', async () => {
+    const storage = memoryStorage()
+    storage.setItem('fl.session', JSON.stringify(sessionFixture()))
+    let unauthorized = 0
+    const { impl } = fakeFetch(() =>
+      jsonResponse({ error: 'wrong_password', message: '当前密码错误' }, 401),
+    )
+    const client = new ApiClient({
+      baseUrl: BASE,
+      fetchImpl: impl,
+      storage,
+      onUnauthorized: () => {
+        unauthorized += 1
+      },
+    })
+
+    await expect(
+      client.changePassword({ currentPassword: 'bad', newPassword: 'new-pw' }),
+    ).rejects.toMatchObject({ status: 401, code: 'wrong_password', message: '当前密码错误' })
+    expect(client.getSession()).not.toBeNull()
+    expect(storage.data.has('fl.session')).toBe(true)
+    expect(unauthorized).toBe(0)
+  })
+})
+
 describe('未登录探针的 401(评审回归)', () => {
   it('不触发会话过期通知、不清空会话', async () => {
     const storage = memoryStorage()
