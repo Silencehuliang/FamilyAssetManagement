@@ -99,6 +99,8 @@ function makeController(options: {
   api: FakeApi
   store?: MemoryLocalStore
   isOnline?: () => boolean
+  now?: () => Date
+  newId?: () => string
 }) {
   const store = options.store ?? new MemoryLocalStore()
   const endpoint = new InMemoryEndpoint()
@@ -107,6 +109,8 @@ function makeController(options: {
     store,
     endpoint,
     isOnline: options.isOnline,
+    now: options.now,
+    newId: options.newId,
   })
   return { controller, store, endpoint }
 }
@@ -269,5 +273,81 @@ describe('AppController 离线队列', () => {
     await expect(store.loadQueueOps()).resolves.toEqual([
       { type: 'delete-expense', id: 'e-1', month: '2026-10', deletedAt: NOW },
     ])
+  })
+})
+
+describe('AppController 记一笔(T6)', () => {
+  async function readyController() {
+    const api = new FakeApi()
+    api.session = sessionOf(ADMIN)
+    api.members = [ADMIN, XIAOHONG]
+    const made = makeController({
+      api,
+      now: () => new Date('2026-10-02T08:30:00.000Z'),
+      newId: () => 'e-fixed',
+    })
+    await made.controller.boot()
+    return made
+  }
+
+  const baseForm = {
+    amountText: '12.5',
+    parentId: 'cat-dining',
+    categoryId: 'cat-dining-2',
+    date: '2026-10-02',
+    note: ' 食堂 ',
+    tagsText: '微信, 现金',
+    memberId: '',
+  }
+
+  it('默认经手人为登录成员;写穿本地并同步到端点', async () => {
+    const { controller, store, endpoint } = await readyController()
+
+    const expense = await controller.recordExpense(baseForm)
+
+    expect(expense).toMatchObject({
+      id: 'e-fixed',
+      amountCents: 1250,
+      memberId: ADMIN.id,
+      recordedBy: ADMIN.id,
+      note: '食堂',
+      tagNames: ['微信', '现金'],
+    })
+    const persisted = await store.loadLedger()
+    expect(persisted?.months['2026-10']?.expenses).toHaveLength(1)
+
+    // recordExpense 的同步是 fire-and-forget;retrySync 会复用进行中的一轮并等待它
+    await controller.retrySync()
+    const files = await endpoint.listFiles()
+    expect(files['ledger/months/2026-10.json']?.content).toContain('"amountCents": 1250')
+  })
+
+  it('可代其他成员记录:memberId 为经手人,recordedBy 仍为记录者', async () => {
+    const { controller } = await readyController()
+
+    const expense = await controller.recordExpense({ ...baseForm, memberId: XIAOHONG.id })
+
+    expect(expense.memberId).toBe(XIAOHONG.id)
+    expect(expense.recordedBy).toBe(ADMIN.id)
+  })
+
+  it('金额为 0 或未选子分类时拒绝且不写入', async () => {
+    const { controller, store } = await readyController()
+
+    await expect(controller.recordExpense({ ...baseForm, amountText: '0' })).rejects.toThrow(/金额/)
+    await expect(
+      controller.recordExpense({ ...baseForm, categoryId: 'cat-dining' }),
+    ).rejects.toThrow(/子分类/)
+    expect((await store.loadLedger())?.months['2026-10']).toBeUndefined()
+  })
+
+  it('账本无分类时(离线首启)播种默认分类后可立即记账', async () => {
+    const { controller } = await readyController()
+    controller.getLedger().meta.categories = []
+
+    const expense = await controller.recordExpense(baseForm)
+
+    expect(expense.categoryId).toBe('cat-dining-2')
+    expect(controller.getLedger().meta.categories.length).toBeGreaterThan(0)
   })
 })

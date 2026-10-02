@@ -1,6 +1,7 @@
 import { type ReactNode, useEffect, useState } from 'react'
 import { SyncBadge } from './components/SyncBadge'
 import { TabIcon } from './components/TabIcon'
+import { AddExpensePage } from './pages/AddExpensePage'
 import { LoginPage } from './pages/LoginPage'
 import { MePage } from './pages/MePage'
 import { PlaceholderPage } from './pages/PlaceholderPage'
@@ -105,7 +106,7 @@ function Shell({ state }: { state: AppState }) {
         <SyncBadge status={state.syncStatus} />
       </header>
       <main className="app-main">
-        {tab === 'add' ? <PlaceholderPage title="记一笔" note="T6 交付" /> : null}
+        {tab === 'add' ? <AddExpensePage controller={appController} state={state} /> : null}
         {tab === 'entries' ? <PlaceholderPage title="支出明细" note="T7 交付" /> : null}
         {tab === 'stats' ? <PlaceholderPage title="统计报表" note="T10 交付" /> : null}
         {tab === 'budget' ? <PlaceholderPage title="预算管理" note="T11 交付" /> : null}

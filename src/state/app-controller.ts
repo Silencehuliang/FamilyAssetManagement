@@ -10,7 +10,15 @@
  */
 import type { AuthResult, LedgerApi, LoginInput, SetupInput, StoredSession } from '../api'
 import { ApiError } from '../api/client'
-import { createEmptyLedger, type LedgerData, type Member } from '../domain'
+import {
+  addExpense,
+  createEmptyLedger,
+  type Expense,
+  type LedgerData,
+  type Member,
+} from '../domain'
+import { DomainError } from '../domain/types'
+import { buildExpenseInput, type EntryForm, ensureCategories } from '../features/entry'
 import type { LocalStore } from '../storage'
 import { PersistentQueue } from '../storage'
 import type { PendingOp, SyncEndpoint } from '../sync'
@@ -47,6 +55,7 @@ export interface AppControllerDeps {
   endpoint?: SyncEndpoint
   isOnline?: () => boolean
   now?: () => Date
+  newId?: () => string
 }
 
 function errorText(err: unknown): string {
@@ -162,14 +171,42 @@ export class AppController {
     this.setState({ phase: 'login', authError: undefined })
   }
 
-  /** 手动重试同步(我的页按钮/在线事件) */
+  /** 手动重试同步(我的页按钮/在线事件);未登录时不发请求 */
   async retrySync(): Promise<void> {
+    if (this.state.phase !== 'ready') return
     await this.syncManager?.syncNow()
   }
 
   /** 登记一条离线删除(领域层已应用变更后由调用方登记) */
   queueOp(op: PendingOp): void {
     this.queue.record(op)
+  }
+
+  /**
+   * 记一笔:表单 → 领域输入 → addExpense(本地即时生效)→ 写穿 IndexedDB →
+   * 触发一轮同步(不阻塞界面,状态徽标随 SyncManager 变化)。
+   */
+  async recordExpense(form: EntryForm): Promise<Expense> {
+    ensureCategories(this.ledger)
+    const actor = this.currentActor()
+    const input = buildExpenseInput(this.ledger, form, actor.id)
+    const now = (this.deps.now ?? (() => new Date()))().toISOString()
+    const newId = (this.deps.newId ?? (() => crypto.randomUUID()))()
+    addExpense(this.ledger, input, { actor, now, newId })
+
+    const month = input.date.slice(0, 7)
+    const created = this.ledger.months[month]?.expenses.find((e) => e.id === newId)
+    if (!created) throw new Error('新增支出后未找到记录')
+
+    await this.persistLedger()
+    void this.syncManager?.syncNow()
+    return created
+  }
+
+  private currentActor(): Member {
+    const member = this.state.member
+    if (!member) throw new DomainError('unauthorized', '未登录')
+    return this.ledger.meta.members.find((m) => m.id === member.id) ?? member
   }
 
   /** 把当前账本写穿到 IndexedDB(领域变更后调用) */
@@ -182,7 +219,7 @@ export class AppController {
   startConnectivityListeners(): () => void {
     if (typeof window === 'undefined') return () => {}
     const onOnline = (): void => {
-      void this.syncManager?.syncNow()
+      if (this.state.phase === 'ready') void this.syncManager?.syncNow()
     }
     const onOffline = (): void => {
       this.syncManager?.markOffline()
