@@ -10,6 +10,7 @@ import {
   DEFAULT_CATEGORIES,
   type Expense,
   type ExpenseInput,
+  type ExpensePatch,
   type LedgerData,
   type MonthKey,
 } from '../domain'
@@ -113,6 +114,39 @@ export function buildExpenseInput(
   form: EntryForm,
   defaultMemberId: string,
 ): ExpenseInput {
+  const { amountCents, date, categoryId, tagNames } = parseFormFields(ledger, form)
+  const note = form.note.trim()
+  return {
+    amountCents,
+    date,
+    categoryId,
+    tagNames,
+    memberId: form.memberId === '' ? defaultMemberId : form.memberId,
+    note: note === '' ? undefined : note,
+  }
+}
+
+/**
+ * 表单 → 领域更新补丁(明细页编辑)。校验与新增一致;备注清空传 null,
+ * 空字符串的经手人表示保持原值(不修改归属)。
+ */
+export function buildExpensePatch(ledger: LedgerData, form: EntryForm): ExpensePatch {
+  const { amountCents, date, categoryId, tagNames } = parseFormFields(ledger, form)
+  const note = form.note.trim()
+  return {
+    amountCents,
+    date,
+    categoryId,
+    tagNames,
+    memberId: form.memberId === '' ? undefined : form.memberId,
+    note: note === '' ? null : note,
+  }
+}
+
+function parseFormFields(
+  ledger: LedgerData,
+  form: EntryForm,
+): { amountCents: number; date: string; categoryId: string; tagNames: string[] } {
   const amountCents = parseAmountToCents(form.amountText)
   const date = form.date.trim()
   if (!DATE_RE.test(date)) {
@@ -125,15 +159,7 @@ export function buildExpenseInput(
   if (category.parentId === undefined) {
     throw new DomainError('category_not_leaf', '请选择子分类')
   }
-  const note = form.note.trim()
-  return {
-    amountCents,
-    date,
-    categoryId: category.id,
-    tagNames: splitTags(form.tagsText),
-    memberId: form.memberId === '' ? defaultMemberId : form.memberId,
-    note: note === '' ? undefined : note,
-  }
+  return { amountCents, date, categoryId: category.id, tagNames: splitTags(form.tagsText) }
 }
 
 /** 分类名解析:优先账本,回退默认分类(首次播种前的展示) */
@@ -141,6 +167,15 @@ export function resolveCategoryName(ledger: LedgerData, id: CategoryId): string 
   const category =
     ledger.meta.categories.find((c) => c.id === id) ?? DEFAULT_CATEGORIES.find((c) => c.id === id)
   return category?.name ?? '未知分类'
+}
+
+/** 子分类的完整展示名「父/子」;父分类缺失时退化为子分类名 */
+export function resolveCategoryPath(ledger: LedgerData, id: CategoryId): string {
+  const category = ledger.meta.categories.find((c) => c.id === id)
+  if (!category) return resolveCategoryName(ledger, id)
+  if (category.parentId === undefined) return category.name
+  const parent = ledger.meta.categories.find((c) => c.id === category.parentId)
+  return parent ? `${parent.name}/${category.name}` : category.name
 }
 
 /** 金额展示:整数分 → "¥12.34" */

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { AuthResult, LoginInput, SetupInput, StoredSession } from '../api'
 import { ApiError } from '../api/client'
-import type { Member } from '../domain'
+import { addExpense, type Member } from '../domain'
 import { ADMIN, NOW, XIAOHONG } from '../domain/fixtures'
 import { MemoryLocalStore } from '../storage'
 import { InMemoryEndpoint } from '../sync'
@@ -349,5 +349,112 @@ describe('AppController 记一笔(T6)', () => {
 
     expect(expense.categoryId).toBe('cat-dining-2')
     expect(controller.getLedger().meta.categories.length).toBeGreaterThan(0)
+  })
+})
+
+describe('AppController 明细页编辑与删除(T7)', () => {
+  const baseForm = {
+    amountText: '12.5',
+    parentId: 'cat-dining',
+    categoryId: 'cat-dining-2',
+    date: '2026-10-02',
+    note: ' 食堂 ',
+    tagsText: '微信',
+    memberId: '',
+  }
+
+  async function readyController(actor: Member = ADMIN) {
+    const api = new FakeApi()
+    api.session = sessionOf(actor)
+    api.members = [ADMIN, XIAOHONG]
+    const made = makeController({
+      api,
+      now: () => new Date('2026-10-02T08:30:00.000Z'),
+      newId: () => 'e-fixed',
+    })
+    await made.controller.boot()
+    return made
+  }
+
+  it('updateExpense:补丁本地生效、写穿存储并同步到端点', async () => {
+    const { controller, store, endpoint } = await readyController()
+    await controller.recordExpense(baseForm)
+
+    await controller.updateExpense('e-fixed', {
+      ...baseForm,
+      amountText: '20',
+      categoryId: 'cat-dining-3',
+      note: '',
+      tagsText: '',
+      memberId: XIAOHONG.id,
+    })
+
+    const updated = controller.getLedger().months['2026-10']?.expenses[0]
+    expect(updated).toMatchObject({
+      amountCents: 2000,
+      categoryId: 'cat-dining-3',
+      memberId: XIAOHONG.id,
+      recordedBy: ADMIN.id,
+      tagNames: [],
+    })
+    expect(updated?.note).toBeUndefined()
+    expect((await store.loadLedger())?.months['2026-10']?.expenses[0]?.amountCents).toBe(2000)
+
+    await controller.retrySync()
+    const files = await endpoint.listFiles()
+    expect(files['ledger/months/2026-10.json']?.content).toContain('"amountCents": 2000')
+  })
+
+  it('updateExpense:改他人的记录被领域层拒绝,记录保持原样', async () => {
+    const { controller } = await readyController(XIAOHONG)
+    const ledger = controller.getLedger()
+    addExpense(
+      ledger,
+      { amountCents: 500, date: '2026-10-02', categoryId: 'cat-dining-2' },
+      { actor: ADMIN, now: NOW, newId: 'e-other' },
+    )
+
+    await expect(
+      controller.updateExpense('e-other', { ...baseForm, amountText: '99' }),
+    ).rejects.toThrow(/只能修改/)
+    expect(ledger.months['2026-10']?.expenses[0]?.amountCents).toBe(500)
+  })
+
+  it('deleteExpense:本地删除 + 登记墓碑,同步后远端月份文件消失、队列清空', async () => {
+    const { controller, store, endpoint } = await readyController()
+    await controller.recordExpense(baseForm)
+    await controller.retrySync()
+    expect((await endpoint.listFiles())['ledger/months/2026-10.json']).toBeDefined()
+
+    await controller.deleteExpense('e-fixed')
+
+    expect(controller.getLedger().months['2026-10']).toBeUndefined()
+    expect((await store.loadLedger())?.months['2026-10']).toBeUndefined()
+    await expect(store.loadQueueOps()).resolves.toEqual([
+      {
+        type: 'delete-expense',
+        id: 'e-fixed',
+        month: '2026-10',
+        deletedAt: '2026-10-02T08:30:00.000Z',
+      },
+    ])
+
+    await controller.retrySync()
+    expect((await endpoint.listFiles())['ledger/months/2026-10.json']).toBeUndefined()
+    await expect(store.loadQueueOps()).resolves.toEqual([])
+  })
+
+  it('deleteExpense:删除他人的记录被拒绝,记录保留', async () => {
+    const { controller, store } = await readyController(XIAOHONG)
+    const ledger = controller.getLedger()
+    addExpense(
+      ledger,
+      { amountCents: 500, date: '2026-10-02', categoryId: 'cat-dining-2' },
+      { actor: ADMIN, now: NOW, newId: 'e-other' },
+    )
+
+    await expect(controller.deleteExpense('e-other')).rejects.toThrow(/只能修改/)
+    expect(ledger.months['2026-10']?.expenses).toHaveLength(1)
+    await expect(store.loadQueueOps()).resolves.toEqual([])
   })
 })

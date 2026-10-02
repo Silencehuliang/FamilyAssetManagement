@@ -13,12 +13,21 @@ import { ApiError } from '../api/client'
 import {
   addExpense,
   createEmptyLedger,
+  deleteExpense as deleteExpenseInLedger,
   type Expense,
+  type ExpenseId,
   type LedgerData,
   type Member,
+  type MonthKey,
+  updateExpense as updateExpenseInLedger,
 } from '../domain'
 import { DomainError } from '../domain/types'
-import { buildExpenseInput, type EntryForm, ensureCategories } from '../features/entry'
+import {
+  buildExpenseInput,
+  buildExpensePatch,
+  type EntryForm,
+  ensureCategories,
+} from '../features/entry'
 import type { LocalStore } from '../storage'
 import { MemoryLocalStore, PersistentQueue } from '../storage'
 import type { PendingOp, SyncEndpoint } from '../sync'
@@ -200,8 +209,8 @@ export class AppController {
     ensureCategories(this.ledger)
     const actor = this.currentActor()
     const input = buildExpenseInput(this.ledger, form, actor.id)
-    const now = (this.deps.now ?? (() => new Date()))().toISOString()
-    const newId = (this.deps.newId ?? (() => crypto.randomUUID()))()
+    const now = this.nowIso()
+    const newId = this.generateId()
     addExpense(this.ledger, input, { actor, now, newId })
 
     const month = input.date.slice(0, 7)
@@ -211,6 +220,51 @@ export class AppController {
     await this.persistLedger()
     void this.syncManager?.syncNow()
     return created
+  }
+
+  /**
+   * 修改一笔(明细页编辑):领域层校验「管理员/经手人/记录者」权限,
+   * 本地立即生效 → 写穿 IndexedDB → 后台同步(LWW 传播,无需队列)。
+   */
+  async updateExpense(id: ExpenseId, form: EntryForm): Promise<void> {
+    const actor = this.currentActor()
+    const patch = buildExpensePatch(this.ledger, form)
+    updateExpenseInLedger(this.ledger, id, patch, {
+      actor,
+      now: this.nowIso(),
+      newId: this.generateId(),
+    })
+    await this.persistLedger()
+    void this.syncManager?.syncNow()
+  }
+
+  /**
+   * 删除一笔:领域层校验权限后本地删除,并登记离线墓碑(delete-expense),
+   * 由 replay 在同步时补删远端,避免其他设备的旧副本把记录推回来。
+   */
+  async deleteExpense(id: ExpenseId): Promise<void> {
+    const actor = this.currentActor()
+    const month = this.monthOfExpense(id)
+    const now = this.nowIso()
+    deleteExpenseInLedger(this.ledger, id, { actor, now, newId: this.generateId() })
+    this.queue.record({ type: 'delete-expense', id, month, deletedAt: now })
+    await this.persistLedger()
+    void this.syncManager?.syncNow()
+  }
+
+  private monthOfExpense(id: ExpenseId): MonthKey {
+    for (const [month, data] of Object.entries(this.ledger.months)) {
+      if (data.expenses.some((e) => e.id === id)) return month
+    }
+    throw new DomainError('unknown_expense', `支出不存在:${id}`)
+  }
+
+  private nowIso(): string {
+    return (this.deps.now ?? (() => new Date()))().toISOString()
+  }
+
+  private generateId(): string {
+    return (this.deps.newId ?? (() => crypto.randomUUID()))()
   }
 
   private currentActor(): Member {

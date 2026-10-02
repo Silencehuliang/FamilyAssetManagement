@@ -172,4 +172,23 @@ describe('updateExpense / deleteExpense 权限:透明 + 自我编辑', () => {
     deleteExpense(ledger, id, ctx())
     expect(ledger.months['2026-10']).toBeUndefined()
   })
+
+  it('备注:缺省不改动,传 null 清除', () => {
+    const ledger = fixtureLedger()
+    addExpense(
+      ledger,
+      { amountCents: 100, date: '2026-10-02', categoryId: LUNCH_CATEGORY, note: '旧备注' },
+      ctx(),
+    )
+    const { id } = expenseAt(ledger, '2026-10', 0)
+
+    updateExpense(ledger, id, { amountCents: 200 }, ctx())
+    expect(expenseAt(ledger, '2026-10', 0).note).toBe('旧备注')
+
+    updateExpense(ledger, id, { note: null }, ctx())
+    const updated = expenseAt(ledger, '2026-10', 0)
+    expect(updated.note).toBeUndefined()
+    // 序列化时不落 "note" 键(undefined 被 JSON.stringify 忽略)
+    expect(JSON.stringify(updated)).not.toContain('note')
+  })
 })
