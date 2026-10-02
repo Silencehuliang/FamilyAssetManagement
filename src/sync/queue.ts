@@ -1,4 +1,4 @@
-import type { CategoryId, ExpenseId, LedgerData, MemberId, MonthKey, RecurringId } from '../domain'
+import type { CategoryId, ExpenseId, LedgerData, MonthKey, RecurringId } from '../domain'
 import type { SyncEndpoint } from './endpoint'
 import type { SyncResult } from './engine'
 import { sync } from './engine'
@@ -6,7 +6,6 @@ import {
   BUDGETS_FILE,
   CATEGORIES_FILE,
   ledgerToFiles,
-  MEMBERS_FILE,
   monthFilePath,
   RECURRING_FILE,
 } from './files'
@@ -39,8 +38,9 @@ export type PendingOp =
     }
   | { type: 'delete-recurring'; id: RecurringId; deletedAt: string }
   | { type: 'delete-category'; id: CategoryId }
-  | { type: 'delete-member'; id: MemberId }
   | { type: 'clear-budget'; month: MonthKey }
+// 注:成员数据由服务端专管(members.json 不属同步文件集),成员的停用/删除
+// 走鉴权端点,不经离线队列。
 
 /** 离线期间登记的操作日志,恢复连接时由 replay 一次性回放并清空 */
 export class PendingQueue {
@@ -97,12 +97,6 @@ function applyDeleteOp(local: LedgerData, op: PendingOp, touched: Set<string>): 
       const before = local.meta.categories.length
       local.meta.categories = local.meta.categories.filter((c) => c.id !== op.id)
       if (local.meta.categories.length !== before) touched.add(CATEGORIES_FILE)
-      return
-    }
-    case 'delete-member': {
-      const before = local.meta.members.length
-      local.meta.members = local.meta.members.filter((m) => m.id !== op.id)
-      if (local.meta.members.length !== before) touched.add(MEMBERS_FILE)
       return
     }
     case 'clear-budget': {

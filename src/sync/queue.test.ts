@@ -5,6 +5,10 @@ import { filesToLedger, ledgerToFiles, monthFilePath } from './files'
 import { InMemoryEndpoint } from './in-memory'
 import { PendingQueue, replay } from './queue'
 
+/** 成员数据不属同步文件集(服务端专管):比较账本内容时忽略 members */
+function sansMembers<L extends { meta: { members: unknown[] } }>(l: L): L {
+  return { ...l, meta: { ...l.meta, members: [] } }
+}
 const T0 = '2026-10-02T08:00:00.000Z'
 
 const MEMBER: Member = {
@@ -87,7 +91,7 @@ describe('replay', () => {
     const result = await replay(new PendingQueue(), local, shared)
 
     expect(result.pushedFiles).toBe(1)
-    expect(filesToLedger(await contentsOf(shared))).toEqual(local)
+    expect(filesToLedger(await contentsOf(shared))).toEqual(sansMembers(local))
   })
 
   it('离线新增与删除混合:回放后三方收敛,队列清空', async () => {
@@ -117,7 +121,7 @@ describe('replay', () => {
     expect(queue.size).toBe(0)
     const ids = local.months['2026-10']?.expenses.map((e) => e.id)
     expect(ids).toEqual(['e-3', 'e-2'])
-    expect(filesToLedger(await contentsOf(shared))).toEqual(local)
+    expect(filesToLedger(await contentsOf(shared))).toEqual(sansMembers(local))
   })
 
   it('月份的最后一条支出被删:端点月份文件被删除', async () => {
@@ -166,36 +170,30 @@ describe('replay', () => {
     await replay(queue, local, shared)
 
     expect(local.months['2026-10']?.expenses.find((e) => e.id === 'e-1')?.amountCents).toBe(5000)
-    expect(filesToLedger(await contentsOf(shared))).toEqual(local)
+    expect(filesToLedger(await contentsOf(shared))).toEqual(sansMembers(local))
     expect(queue.size).toBe(0)
   })
 
-  it('成员/分类删除与清空预算按登记顺序回放(合并会先复活,再补删)', async () => {
+  it('分类删除与清空预算按登记顺序回放(合并会先复活,再补删)', async () => {
     const baseline = baseLedger()
     const shared = new InMemoryEndpoint(ledgerToFiles(baseline))
     const local = structuredClone(baseline)
 
-    // 离线删除(领域层应用之后逐条登记)
+    // 离线删除(领域层应用之后逐条登记);成员删除不属同步范围(服务端专管)
     local.meta.members = local.meta.members.filter((m) => m.id !== 'm-2')
     local.meta.categories = local.meta.categories.filter((c) => c.id !== 'c-2')
     delete local.meta.budgets['2026-10']
     const queue = new PendingQueue()
-    queue.record({ type: 'delete-member', id: 'm-2' })
     queue.record({ type: 'delete-category', id: 'c-2' })
     queue.record({ type: 'clear-budget', month: '2026-10' })
-    expect(queue.pending.map((op) => op.type)).toEqual([
-      'delete-member',
-      'delete-category',
-      'clear-budget',
-    ])
+    expect(queue.pending.map((op) => op.type)).toEqual(['delete-category', 'clear-budget'])
 
     const result = await replay(queue, local, shared)
 
-    // 远端旧副本会在合并中复活,靠补删写回:3 个 meta 文件各推送一次
-    expect(result.pushedFiles).toBe(3)
+    // 远端旧副本会在合并中复活,靠补删写回:2 个 meta 文件各推送一次
+    expect(result.pushedFiles).toBe(2)
     const remoteLedger = filesToLedger(await contentsOf(shared))
-    expect(remoteLedger).toEqual(local)
-    expect(remoteLedger.meta.members.map((m) => m.id)).toEqual(['m-1'])
+    expect(remoteLedger).toEqual(sansMembers(local))
     expect(remoteLedger.meta.categories.map((c) => c.id)).toEqual(['c-1'])
     expect(remoteLedger.meta.budgets).toEqual({})
     expect(queue.size).toBe(0)
@@ -225,7 +223,7 @@ describe('replay', () => {
 
     await replay(queue, local, shared)
 
-    expect(filesToLedger(await contentsOf(shared))).toEqual(local)
+    expect(filesToLedger(await contentsOf(shared))).toEqual(sansMembers(local))
     expect(queue.size).toBe(0)
   })
 })

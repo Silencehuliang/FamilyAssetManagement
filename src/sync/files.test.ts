@@ -1,13 +1,18 @@
 import { describe, expect, it } from 'vitest'
 import type { Expense, LedgerData } from '../domain'
 import { createEmptyLedger } from '../domain'
+
+/** 成员数据不属同步文件集(服务端专管):比较账本内容时忽略 members */
+function sansMembers<L extends { meta: { members: unknown[] } }>(l: L): L {
+  return { ...l, meta: { ...l.meta, members: [] } }
+}
+
 import {
   BUDGETS_FILE,
   CATEGORIES_FILE,
   filesToLedger,
   isLedgerFilePath,
   ledgerToFiles,
-  MEMBERS_FILE,
   monthFilePath,
   parseMonthFilePath,
   RECURRING_FILE,
@@ -69,12 +74,12 @@ function contentLedger(): LedgerData {
 }
 
 describe('ledgerToFiles', () => {
-  it('空账本恰好产生 4 个 meta 文件,无月份文件,内容为空集合', () => {
+  it('空账本恰好产生 3 个 meta 文件(members.json 不属同步范围),无月份文件,内容为空集合', () => {
     const files = ledgerToFiles(createEmptyLedger())
     expect(Object.keys(files).sort()).toEqual(
-      [MEMBERS_FILE, CATEGORIES_FILE, BUDGETS_FILE, RECURRING_FILE].sort(),
+      [CATEGORIES_FILE, BUDGETS_FILE, RECURRING_FILE].sort(),
     )
-    expect(files[MEMBERS_FILE]).toBe('{\n  "members": []\n}\n')
+    expect(files['ledger/meta/members.json']).toBeUndefined()
     expect(files[CATEGORIES_FILE]).toBe('{\n  "categories": []\n}\n')
     expect(files[BUDGETS_FILE]).toBe('{\n  "budgets": {}\n}\n')
     expect(files[RECURRING_FILE]).toBe('{\n  "recurring": []\n}\n')
@@ -86,7 +91,6 @@ describe('ledgerToFiles', () => {
       [
         monthFilePath('2026-09'),
         monthFilePath('2026-10'),
-        MEMBERS_FILE,
         CATEGORIES_FILE,
         BUDGETS_FILE,
         RECURRING_FILE,
@@ -103,13 +107,15 @@ describe('ledgerToFiles', () => {
     ledger.months['2026-11'] = { expenses: [] }
     const files = ledgerToFiles(ledger)
     expect(files[monthFilePath('2026-11')]).toBeUndefined()
-    expect(Object.keys(files)).toHaveLength(4)
+    expect(Object.keys(files)).toHaveLength(3)
   })
 })
 
 describe('filesToLedger', () => {
-  it('与 ledgerToFiles 互逆(往返性质)', () => {
-    expect(filesToLedger(ledgerToFiles(contentLedger()))).toEqual(contentLedger())
+  it('与 ledgerToFiles 互逆(往返性质,忽略不参与同步的 members)', () => {
+    expect(sansMembers(filesToLedger(ledgerToFiles(contentLedger())))).toEqual(
+      sansMembers(contentLedger()),
+    )
     expect(filesToLedger(ledgerToFiles(createEmptyLedger()))).toEqual(createEmptyLedger())
   })
 
@@ -127,7 +133,7 @@ describe('filesToLedger', () => {
   })
 
   it('无效 JSON 抛错并带路径信息', () => {
-    expect(() => filesToLedger({ [MEMBERS_FILE]: '不是 JSON' })).toThrowError(MEMBERS_FILE)
+    expect(() => filesToLedger({ [CATEGORIES_FILE]: '不是 JSON' })).toThrowError(CATEGORIES_FILE)
   })
 })
 
@@ -135,7 +141,7 @@ describe('路径工具', () => {
   it('parseMonthFilePath 与 isLedgerFilePath', () => {
     expect(parseMonthFilePath('ledger/months/2026-10.json')).toBe('2026-10')
     expect(parseMonthFilePath('ledger/months/notes.json')).toBeUndefined()
-    expect(parseMonthFilePath(MEMBERS_FILE)).toBeUndefined()
+    expect(parseMonthFilePath('ledger/meta/members.json')).toBeUndefined()
     expect(isLedgerFilePath(monthFilePath('2026-10'))).toBe(true)
     expect(isLedgerFilePath(RECURRING_FILE)).toBe(true)
     expect(isLedgerFilePath('ledger/months/notes.json')).toBe(false)

@@ -1,12 +1,4 @@
-import type {
-  Budget,
-  Category,
-  Expense,
-  LedgerData,
-  Member,
-  MonthKey,
-  RecurringExpense,
-} from '../domain'
+import type { Budget, Category, Expense, LedgerData, MonthKey, RecurringExpense } from '../domain'
 import { createEmptyLedger } from '../domain'
 
 /**
@@ -14,7 +6,7 @@ import { createEmptyLedger } from '../domain'
  *
  * 文件清单:
  * - `ledger/months/<YYYY-MM>.json`:`{"expenses": [...]}`,按自然月一个文件;空月份不落文件
- * - `ledger/meta/members.json`:`{"members": [...]}`(成员含凭据字段,原样透传,不做裁剪)
+ * - (members.json 由服务端专属管理,不进入客户端同步文件集 —— ADR-0005/0006)
  * - `ledger/meta/categories.json`:`{"categories": [...]}`
  * - `ledger/meta/budgets.json`:`{"budgets": {"<YYYY-MM>": {...}}}`
  * - `ledger/meta/recurring.json`:`{"recurring": [...]}`
@@ -22,7 +14,6 @@ import { createEmptyLedger } from '../domain'
  * JSON 一律 2 空格缩进、结尾换行;budgets 的月份键按字典序输出,保证内容确定、diff 友好。
  */
 
-export const MEMBERS_FILE = 'ledger/meta/members.json'
 export const CATEGORIES_FILE = 'ledger/meta/categories.json'
 export const BUDGETS_FILE = 'ledger/meta/budgets.json'
 export const RECURRING_FILE = 'ledger/meta/recurring.json'
@@ -39,11 +30,10 @@ export function parseMonthFilePath(path: string): MonthKey | undefined {
   return MONTH_FILE_RE.exec(path)?.[1]
 }
 
-/** 是否为同步关心的账本文件(仓库里的 README 等其他文件不参与同步) */
+/** 是否为同步关心的账本文件(仓库里的 README 等其他文件不参与同步;members.json 服务端专管) */
 export function isLedgerFilePath(path: string): boolean {
   return (
     MONTH_FILE_RE.test(path) ||
-    path === MEMBERS_FILE ||
     path === CATEGORIES_FILE ||
     path === BUDGETS_FILE ||
     path === RECURRING_FILE
@@ -74,7 +64,6 @@ export function ledgerToFiles(ledger: LedgerData): Record<string, string> {
     if (!data || data.expenses.length === 0) continue
     files[monthFilePath(month)] = serialize({ expenses: data.expenses })
   }
-  files[MEMBERS_FILE] = serialize({ members: ledger.meta.members })
   files[CATEGORIES_FILE] = serialize({ categories: ledger.meta.categories })
   files[BUDGETS_FILE] = serialize({ budgets: withSortedMonthKeys(ledger.meta.budgets) })
   files[RECURRING_FILE] = serialize({ recurring: ledger.meta.recurring })
@@ -105,6 +94,7 @@ function arrayField<T>(path: string, content: string, field: string): T[] {
 /**
  * 文件 → 账本(ledgerToFiles 的逆映射),宽容反序列化:
  * - 缺失的 meta 文件视为空集合;缺失的月份文件视为该月无支出
+ * - members.json 若出现则被忽略(服务端专管;客户端成员列表经 GET /api/members 填充)
  * - `{"expenses": []}` 的月份文件不建月份条目(与「空月份不落文件」对称)
  * - 无效 JSON 抛错(宁可失败,不静默丢数据);形状不对的字段按空处理
  * - 不认识的路径忽略;月份路径必须是 `YYYY-MM` 命名,其余忽略
@@ -117,11 +107,6 @@ export function filesToLedger(files: Record<string, string>): LedgerData {
     const parsed = parseJsonFile(path, content)
     const expenses = isObject(parsed) ? asArray<Expense>(parsed.expenses) : []
     if (expenses.length > 0) ledger.months[month] = { expenses }
-  }
-
-  const members = files[MEMBERS_FILE]
-  if (members !== undefined) {
-    ledger.meta.members = arrayField<Member>(MEMBERS_FILE, members, 'members')
   }
 
   const categories = files[CATEGORIES_FILE]

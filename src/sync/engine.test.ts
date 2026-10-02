@@ -7,6 +7,10 @@ import { sync } from './engine'
 import { filesToLedger, ledgerToFiles, monthFilePath } from './files'
 import { InMemoryEndpoint } from './in-memory'
 
+/** 成员数据不属同步文件集(服务端专管):比较账本内容时忽略 members */
+function sansMembers<L extends { meta: { members: unknown[] } }>(l: L): L {
+  return { ...l, meta: { ...l.meta, members: [] } }
+}
 const T0 = '2026-10-02T08:00:00.000Z'
 
 function expense(
@@ -89,19 +93,18 @@ class SpyEndpoint implements SyncEndpoint {
 }
 
 describe('sync', () => {
-  it('空账本同步到空端点:恰好 4 个 meta 文件,无月份文件', async () => {
+  it('空账本同步到空端点:恰好 3 个 meta 文件(members.json 服务端专管),无月份文件', async () => {
     const local = createEmptyLedger()
     const endpoint = new InMemoryEndpoint()
 
     const result = await sync(local, endpoint)
 
-    expect(result).toEqual({ pulledFiles: 0, pushedFiles: 4, conflictsResolved: 0 })
+    expect(result).toEqual({ pulledFiles: 0, pushedFiles: 3, conflictsResolved: 0 })
     const files = await endpoint.listFiles()
     expect(Object.keys(files).sort()).toEqual(
       [
         'ledger/meta/budgets.json',
         'ledger/meta/categories.json',
-        'ledger/meta/members.json',
         'ledger/meta/recurring.json',
       ].sort(),
     )
@@ -167,20 +170,12 @@ describe('sync', () => {
     expect(winnerX).toBe(JSON.stringify(x) > JSON.stringify(y) ? '甲' : '乙')
   })
 
-  it('成员/分类/预算:远端只补缺,双方都有保留本地(v1 规则)', async () => {
+  it('成员数据不随文件同步(服务端专管);分类/预算:远端只补缺,双方都有保留本地(v1 规则)', async () => {
     const memberLocal = {
       id: 'm-1',
       username: 'aming',
       displayName: '本地名',
       role: 'admin' as const,
-      disabled: false,
-      createdAt: T0,
-    }
-    const memberNew = {
-      id: 'm-2',
-      username: 'xiaohong',
-      displayName: '新成员',
-      role: 'member' as const,
       disabled: false,
       createdAt: T0,
     }
@@ -194,7 +189,7 @@ describe('sync', () => {
     local.meta.budgets = { '2026-10': budgetOct }
 
     const remote = createEmptyLedger()
-    remote.meta.members = [{ ...memberLocal, displayName: '远端名' }, memberNew]
+    remote.meta.members = [{ ...memberLocal, displayName: '远端名', id: 'm-2' }]
     remote.meta.categories = [
       { id: 'c-1', name: '远端分类', sortOrder: 5 },
       { id: 'c-2', name: '新增分类', sortOrder: 2 },
@@ -204,7 +199,8 @@ describe('sync', () => {
     const result = await sync(local, new InMemoryEndpoint(ledgerToFiles(remote)))
 
     expect(result.conflictsResolved).toBe(0)
-    expect(local.meta.members).toEqual([memberLocal, memberNew])
+    // 远端文件不含成员数据,本地成员列表保持原样(由 GET /api/members 填充)
+    expect(local.meta.members).toEqual([memberLocal])
     expect(local.meta.categories).toEqual([
       { id: 'c-1', name: '本地分类', sortOrder: 1 },
       { id: 'c-2', name: '新增分类', sortOrder: 2 },
@@ -216,7 +212,7 @@ describe('sync', () => {
     const local = ledgerWith([expense('e-1', '2026-10-02', T0)])
     const shared = new InMemoryEndpoint()
     const first = await sync(local, shared)
-    expect(first.pushedFiles).toBe(5) // 1 个月份文件 + 4 个 meta
+    expect(first.pushedFiles).toBe(4) // 1 个月份文件 + 3 个 meta
 
     const month = local.months['2026-10']
     if (!month) throw new Error('2026-10 应存在')
@@ -298,7 +294,7 @@ describe('sync', () => {
     await sync(a, shared)
     await sync(b, shared)
     expect(a).toEqual(b)
-    expect(filesToLedger(await contentsOf(shared))).toEqual(a)
+    expect(sansMembers(filesToLedger(await contentsOf(shared)))).toEqual(sansMembers(a))
 
     // 幂等:完全收敛后再同步,无任何增量
     const idle = await sync(a, shared)
