@@ -320,3 +320,80 @@ describe('sync', () => {
     expect(aFinal.conflictsResolved).toBe(1)
   })
 })
+
+describe('adminFilesPolicy(成员端采纳管理员维护的分类/预算)', () => {
+  const CATEGORIES = [
+    { id: 'c-1', name: '管理员改名', sortOrder: 1 },
+    { id: 'c-2', name: '管理员新增', sortOrder: 2 },
+  ]
+  const BUDGETS = { '2026-10': { totalCents: 500000, categoryCents: {} } }
+
+  /** 本地持有旧分类/旧预算(成员设备停更一段时间) */
+  function staleLocal(): ReturnType<typeof createEmptyLedger> {
+    const local = createEmptyLedger()
+    local.meta.categories = [{ id: 'c-1', name: '本地旧名', sortOrder: 9 }]
+    local.meta.budgets = { '2026-10': { totalCents: 1, categoryCents: {} } }
+    return local
+  }
+
+  function remoteWithAdminFiles(): ReturnType<typeof createEmptyLedger> {
+    const remote = createEmptyLedger()
+    remote.meta.categories = structuredClone(CATEGORIES)
+    remote.meta.budgets = structuredClone(BUDGETS)
+    return remote
+  }
+
+  it('remote-wins:采用远端分类与预算,本地旧副本不回推', async () => {
+    const local = staleLocal()
+    const endpoint = new InMemoryEndpoint(ledgerToFiles(remoteWithAdminFiles()))
+
+    const result = await sync(local, endpoint, { adminFilesPolicy: 'remote-wins' })
+
+    expect(local.meta.categories).toEqual(CATEGORIES)
+    expect(local.meta.budgets).toEqual(BUDGETS)
+    expect(result.pulledFiles).toBe(2) // categories + budgets
+    expect(result.pushedFiles).toBe(0)
+    const contents = await contentsOf(endpoint)
+    expect(filesToLedger(contents).meta.categories).toEqual(CATEGORIES)
+    expect(filesToLedger(contents).meta.budgets).toEqual(BUDGETS)
+  })
+
+  it('remote-wins:远端缺分类/预算文件时保留本地(空远端不清空)', async () => {
+    const local = staleLocal()
+    const endpoint = new InMemoryEndpoint()
+
+    await sync(local, endpoint, { adminFilesPolicy: 'remote-wins' })
+
+    expect(local.meta.categories).toEqual([{ id: 'c-1', name: '本地旧名', sortOrder: 9 }])
+    expect(local.meta.budgets).toEqual({ '2026-10': { totalCents: 1, categoryCents: {} } })
+  })
+
+  it('local-wins(管理员端):本地编辑保留并推送,远端被更新', async () => {
+    const local = staleLocal()
+    const endpoint = new InMemoryEndpoint(ledgerToFiles(remoteWithAdminFiles()))
+
+    const result = await sync(local, endpoint, { adminFilesPolicy: 'local-wins' })
+
+    expect(local.meta.categories).toEqual([
+      { id: 'c-1', name: '本地旧名', sortOrder: 9 },
+      { id: 'c-2', name: '管理员新增', sortOrder: 2 },
+    ])
+    // 本地已有的月份预算保留,远端独有月份补入
+    expect(local.meta.budgets).toEqual({ '2026-10': { totalCents: 1, categoryCents: {} } })
+    expect(result.pushedFiles).toBe(2) // categories + budgets
+    const contents = await contentsOf(endpoint)
+    expect(filesToLedger(contents).meta.categories.find((c) => c.id === 'c-1')?.name).toBe(
+      '本地旧名',
+    )
+  })
+
+  it('不传 options 等价于 local-wins(默认行为不变)', async () => {
+    const local = staleLocal()
+    const endpoint = new InMemoryEndpoint(ledgerToFiles(remoteWithAdminFiles()))
+
+    await sync(local, endpoint)
+
+    expect(local.meta.categories.find((c) => c.id === 'c-1')?.name).toBe('本地旧名')
+    expect(local.meta.budgets).toEqual({ '2026-10': { totalCents: 1, categoryCents: {} } })
+  })
+})

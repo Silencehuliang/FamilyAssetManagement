@@ -1,8 +1,16 @@
 import { SYNC_LABELS } from '../components/SyncBadge'
 import type { AppController, AppState } from '../state/app-controller'
 
-/** 我的:当前成员、角色、同步状态与手动重试、登出 */
-export function MePage({ controller, state }: { controller: AppController; state: AppState }) {
+/** 我的:当前成员、角色、分类管理入口、同步状态与手动重试、登出 */
+export function MePage({
+  controller,
+  state,
+  onOpenCategories,
+}: {
+  controller: AppController
+  state: AppState
+  onOpenCategories: () => void
+}) {
   const member = state.member
   return (
     <div className="page">
@@ -12,6 +20,13 @@ export function MePage({ controller, state }: { controller: AppController; state
         <p className="member-meta">
           @{member?.username} · {member?.role === 'admin' ? '管理员' : '成员'}
         </p>
+      </section>
+
+      <section className="card">
+        <h2 className="card-title">账本设置</h2>
+        <button type="button" className="primary-button" onClick={onOpenCategories}>
+          分类管理
+        </button>
       </section>
 
       <section className="card">

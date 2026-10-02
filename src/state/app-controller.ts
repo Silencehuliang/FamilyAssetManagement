@@ -11,17 +11,23 @@
 import type { AuthResult, LedgerApi, LoginInput, SetupInput, StoredSession } from '../api'
 import { ApiError } from '../api/client'
 import {
+  addCategory as addCategoryInLedger,
   addExpense,
+  type Category,
+  type CategoryId,
   createEmptyLedger,
+  deleteCategory as deleteCategoryInLedger,
   deleteExpense as deleteExpenseInLedger,
   type Expense,
   type ExpenseId,
   type LedgerData,
   type Member,
   type MonthKey,
+  updateCategory as updateCategoryInLedger,
   updateExpense as updateExpenseInLedger,
 } from '../domain'
 import { DomainError } from '../domain/types'
+import { nextSortOrder } from '../features/categories'
 import {
   buildExpenseInput,
   buildExpensePatch,
@@ -137,6 +143,7 @@ export class AppController {
       endpoint: this.deps.endpoint ?? createRemoteEndpoint(this.deps.api),
       queue: this.queue,
       ledger: this.ledger,
+      getRole: () => this.deps.api.getSession()?.member.role,
       isOnline: this.deps.isOnline,
       onStatus: (status, error) => this.setState({ syncStatus: status, syncError: error }),
       onSynced: () => this.persistLedger(),
@@ -257,6 +264,58 @@ export class AppController {
       if (data.expenses.some((e) => e.id === id)) return month
     }
     throw new DomainError('unknown_expense', `支出不存在:${id}`)
+  }
+
+  /**
+   * 新增分类(T8,仅管理员;领域层二次门禁):parentId 缺省为父分类,
+   * 排序位次取同级最大 + 1,写穿本地并触发同步。
+   */
+  async addCategory(input: { name: string; parentId?: CategoryId }): Promise<Category> {
+    const actor = this.currentActor()
+    const name = input.name.trim()
+    if (name === '') throw new DomainError('invalid_name', '请输入分类名称')
+    const id = `cat-${this.generateId()}`
+    addCategoryInLedger(this.ledger, actor, {
+      id,
+      name,
+      parentId: input.parentId,
+      sortOrder: nextSortOrder(this.ledger, input.parentId),
+    })
+    const created = this.ledger.meta.categories.find((c) => c.id === id)
+    if (!created) throw new Error('新增分类后未找到记录')
+    await this.persistLedger()
+    void this.syncManager?.syncNow()
+    return created
+  }
+
+  /** 重命名分类或调整排序(T8,仅管理员) */
+  async updateCategory(
+    id: CategoryId,
+    patch: { name?: string; sortOrder?: number },
+  ): Promise<void> {
+    const actor = this.currentActor()
+    const next = { ...patch }
+    if (patch.name !== undefined) {
+      const name = patch.name.trim()
+      if (name === '') throw new DomainError('invalid_name', '请输入分类名称')
+      next.name = name
+    }
+    updateCategoryInLedger(this.ledger, actor, id, next)
+    await this.persistLedger()
+    void this.syncManager?.syncNow()
+  }
+
+  /**
+   * 删除分类(T8,仅管理员):有支出的子分类必须传 migrateToId(同父子分类),
+   * 支出迁移过去;有子分类的父分类会被领域层拒绝(category_has_children)。
+   * 删除经离线队列登记,防止远端旧分类被合并复活。
+   */
+  async deleteCategory(id: CategoryId, migrateToId?: CategoryId): Promise<void> {
+    const actor = this.currentActor()
+    deleteCategoryInLedger(this.ledger, actor, id, migrateToId)
+    this.queue.record({ type: 'delete-category', id })
+    await this.persistLedger()
+    void this.syncManager?.syncNow()
   }
 
   private nowIso(): string {

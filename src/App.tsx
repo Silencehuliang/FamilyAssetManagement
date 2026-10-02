@@ -2,6 +2,7 @@ import { type ReactNode, useEffect, useState } from 'react'
 import { SyncBadge } from './components/SyncBadge'
 import { TabIcon } from './components/TabIcon'
 import { AddExpensePage } from './pages/AddExpensePage'
+import { CategoriesPage } from './pages/CategoriesPage'
 import { EntriesPage } from './pages/EntriesPage'
 import { LoginPage } from './pages/LoginPage'
 import { MePage } from './pages/MePage'
@@ -99,6 +100,12 @@ export default function App() {
 
 function Shell({ state }: { state: AppState }) {
   const [tab, setTab] = useState<TabKey>('add')
+  const [view, setView] = useState<'categories' | null>(null)
+
+  const openTab = (key: TabKey): void => {
+    setTab(key)
+    setView(null)
+  }
 
   return (
     <div className="app">
@@ -107,19 +114,32 @@ function Shell({ state }: { state: AppState }) {
         <SyncBadge status={state.syncStatus} />
       </header>
       <main className="app-main">
-        {tab === 'add' ? <AddExpensePage controller={appController} state={state} /> : null}
-        {tab === 'entries' ? <EntriesPage controller={appController} state={state} /> : null}
-        {tab === 'stats' ? <PlaceholderPage title="统计报表" note="T10 交付" /> : null}
-        {tab === 'budget' ? <PlaceholderPage title="预算管理" note="T11 交付" /> : null}
-        {tab === 'me' ? <MePage controller={appController} state={state} /> : null}
+        {view === 'categories' ? (
+          <CategoriesPage controller={appController} state={state} onBack={() => setView(null)} />
+        ) : null}
+        {view === null ? (
+          <>
+            {tab === 'add' ? <AddExpensePage controller={appController} state={state} /> : null}
+            {tab === 'entries' ? <EntriesPage controller={appController} state={state} /> : null}
+            {tab === 'stats' ? <PlaceholderPage title="统计报表" note="T10 交付" /> : null}
+            {tab === 'budget' ? <PlaceholderPage title="预算管理" note="T11 交付" /> : null}
+            {tab === 'me' ? (
+              <MePage
+                controller={appController}
+                state={state}
+                onOpenCategories={() => setView('categories')}
+              />
+            ) : null}
+          </>
+        ) : null}
       </main>
       <nav className="tab-bar">
         {TABS.map((t) => (
           <button
             key={t.key}
             type="button"
-            className={`tab ${tab === t.key ? 'tab-active' : ''}`}
-            onClick={() => setTab(t.key)}
+            className={`tab ${tab === t.key && view === null ? 'tab-active' : ''}`}
+            onClick={() => openTab(t.key)}
           >
             {t.icon}
             <span>{t.label}</span>

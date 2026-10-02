@@ -1,6 +1,12 @@
 import type { Budget, Category, Expense, LedgerData, Member, MonthKey } from '../domain'
 import type { RemoteFile, SyncEndpoint } from './endpoint'
-import { filesToLedger, isLedgerFilePath, ledgerToFiles } from './files'
+import {
+  BUDGETS_FILE,
+  CATEGORIES_FILE,
+  filesToLedger,
+  isLedgerFilePath,
+  ledgerToFiles,
+} from './files'
 
 /**
  * 同步引擎:一轮「拉取 → 记录级合并 → 增量推送」(ADR-0004)。
@@ -9,9 +15,10 @@ import { filesToLedger, isLedgerFilePath, ledgerToFiles } from './files'
  * - 支出与周期支出:按 id 取并集;双方都有时按 updatedAt 后写胜出(LWW)。
  *   同一时刻(updatedAt 相同)而内容不同时,取 JSON 序列化后字典序更大的一方——
  *   该规则与「谁是本地、谁是远端」无关,保证多端在同刻冲突下收敛到同一结果。
- * - 成员/分类(无 updatedAt 字段):远端只补本地缺失的 id,双方都有时保留本地。
- *   v1 简化规则:成员/分类的编辑只向「还没有该记录」的设备传播,不向已持有旧副本的设备传播。
- * - 预算:按月份键合并,规则同成员/分类(预算无时间戳)。
+ * - 成员:远端只补本地缺失的 id,双方都有时保留本地。
+ * - 分类:默认远端只补缺、双方都有保留本地;adminFilesPolicy='remote-wins' 时
+ *   采用远端文件(成员端采纳管理员改动,不用旧副本回推)。
+ * - 预算:默认按月份键合并(本地优先);remote-wins 时采用远端文件。
  * - 支出按其日期所属月份重新归档:记录被改期后自动换月文件,旧月份随之清空。
  *
  * 合并输出规范化:各集合按 id 升序(支出再按日期),月份键与预算键按字典序,
@@ -31,6 +38,17 @@ export interface SyncResult {
   pushedFiles: number
   /** 记录级冲突次数:同一 id 双方都有且 updatedAt 或内容不同,由 LWW 裁决 */
   conflictsResolved: number
+}
+
+/**
+ * 管理员维护文件(分类/预算)的合并策略:
+ * - local-wins(默认):双方都有保留本地,管理员端据此推送自己的编辑;
+ * - remote-wins:远端文件存在时采用远端版本,成员端据此采纳管理员改动。
+ */
+export type AdminFilesPolicy = 'local-wins' | 'remote-wins'
+
+export interface SyncOptions {
+  adminFilesPolicy?: AdminFilesPolicy
 }
 
 interface Counter {
@@ -118,6 +136,7 @@ function groupByMonth(expenses: Expense[]): Record<MonthKey, { expenses: Expense
 function mergeLedgers(
   local: LedgerData,
   remote: LedgerData,
+  policies: { categories: AdminFilesPolicy; budgets: AdminFilesPolicy },
 ): { merged: LedgerData; conflictsResolved: number } {
   const counter: Counter = { n: 0 }
   const expenses = mergeTimestamped(
@@ -127,13 +146,20 @@ function mergeLedgers(
   )
   const recurring = mergeTimestamped(local.meta.recurring, remote.meta.recurring, counter)
   const members = mergeWithoutTimestamps<Member>(local.meta.members, remote.meta.members)
-  const categories = mergeWithoutTimestamps<Category>(local.meta.categories, remote.meta.categories)
+  const categories =
+    policies.categories === 'remote-wins'
+      ? [...remote.meta.categories].sort(byId)
+      : mergeWithoutTimestamps<Category>(local.meta.categories, remote.meta.categories)
+  const budgets =
+    policies.budgets === 'remote-wins'
+      ? remote.meta.budgets
+      : mergeBudgets(local.meta.budgets, remote.meta.budgets)
   return {
     merged: {
       meta: {
         members,
         categories,
-        budgets: mergeBudgets(local.meta.budgets, remote.meta.budgets),
+        budgets,
         recurring,
       },
       months: groupByMonth(expenses),
@@ -174,8 +200,14 @@ export async function pushFiles(
 /**
  * 执行一轮同步:拉取端点文件 → 与 local 记录级合并 → 把合并后内容与远端不同的文件
  * 逐个写回(增量:内容未变化的文件不产生 putFile)。local 被原地更新为合并状态。
+ * options.adminFilesPolicy 控制分类/预算的合并方向(默认 local-wins,保持既有行为);
+ * remote-wins 仅在远端确实存在对应文件时生效,避免空远端清空本地。
  */
-export async function sync(local: LedgerData, endpoint: SyncEndpoint): Promise<SyncResult> {
+export async function sync(
+  local: LedgerData,
+  endpoint: SyncEndpoint,
+  options: SyncOptions = {},
+): Promise<SyncResult> {
   const before = ledgerToFiles(local)
   const remoteFiles = await endpoint.listFiles()
 
@@ -184,7 +216,11 @@ export async function sync(local: LedgerData, endpoint: SyncEndpoint): Promise<S
     if (isLedgerFilePath(path)) remoteContent[path] = file.content
   }
 
-  const { merged, conflictsResolved } = mergeLedgers(local, filesToLedger(remoteContent))
+  const remoteWins = options.adminFilesPolicy === 'remote-wins'
+  const { merged, conflictsResolved } = mergeLedgers(local, filesToLedger(remoteContent), {
+    categories: remoteWins && CATEGORIES_FILE in remoteContent ? 'remote-wins' : 'local-wins',
+    budgets: remoteWins && BUDGETS_FILE in remoteContent ? 'remote-wins' : 'local-wins',
+  })
   local.meta = merged.meta
   local.months = merged.months
 

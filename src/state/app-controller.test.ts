@@ -458,3 +458,102 @@ describe('AppController 明细页编辑与删除(T7)', () => {
     await expect(store.loadQueueOps()).resolves.toEqual([])
   })
 })
+
+describe('AppController 分类管理(T8)', () => {
+  async function readyController(actor: Member = ADMIN) {
+    const api = new FakeApi()
+    api.session = sessionOf(actor)
+    api.members = [ADMIN, XIAOHONG]
+    const made = makeController({
+      api,
+      now: () => new Date('2026-10-02T08:30:00.000Z'),
+    })
+    await made.controller.boot()
+    return made
+  }
+
+  it('管理员:新增父/子分类、重命名,写穿本地并同步到端点', async () => {
+    const { controller, store, endpoint } = await readyController()
+
+    const parent = await controller.addCategory({ name: ' 咖啡 ' })
+    expect(parent).toMatchObject({ name: '咖啡', sortOrder: 10 }) // 预设 10 个父分类
+    expect(parent.parentId).toBeUndefined()
+
+    const child = await controller.addCategory({ name: '咖啡豆', parentId: parent.id })
+    expect(child).toMatchObject({ name: '咖啡豆', parentId: parent.id, sortOrder: 0 })
+
+    await controller.updateCategory(child.id, { name: '手冲' })
+    expect(controller.getLedger().meta.categories.find((c) => c.id === child.id)?.name).toBe('手冲')
+
+    await controller.retrySync()
+    const files = await endpoint.listFiles()
+    expect(files['ledger/meta/categories.json']?.content).toContain('手冲')
+    expect((await store.loadLedger())?.meta.categories.find((c) => c.id === parent.id)?.name).toBe(
+      '咖啡',
+    )
+  })
+
+  it('删除有支出的子分类:未指定迁移目标被拒;指定同父子分类后支出迁移并登记墓碑', async () => {
+    const { controller, store } = await readyController()
+    await controller.recordExpense({
+      amountText: '12',
+      parentId: 'cat-dining',
+      categoryId: 'cat-dining-2',
+      date: '2026-10-02',
+      note: '',
+      tagsText: '',
+      memberId: '',
+    })
+
+    await expect(controller.deleteCategory('cat-dining-2')).rejects.toMatchObject({
+      code: 'category_in_use',
+    })
+    expect(controller.getLedger().meta.categories.some((c) => c.id === 'cat-dining-2')).toBe(true)
+
+    await controller.deleteCategory('cat-dining-2', 'cat-dining-3')
+
+    expect(controller.getLedger().meta.categories.some((c) => c.id === 'cat-dining-2')).toBe(false)
+    expect(controller.getLedger().months['2026-10']?.expenses[0]?.categoryId).toBe('cat-dining-3')
+    await expect(store.loadQueueOps()).resolves.toEqual([
+      { type: 'delete-category', id: 'cat-dining-2' },
+    ])
+  })
+
+  it('删除有子分类的父分类被拒(category_has_children),账本不变', async () => {
+    const { controller } = await readyController()
+
+    await expect(controller.deleteCategory('cat-dining')).rejects.toMatchObject({
+      code: 'category_has_children',
+    })
+    expect(controller.getLedger().meta.categories.some((c) => c.id === 'cat-dining')).toBe(true)
+  })
+
+  it('同级重名被拒(category_duplicated)', async () => {
+    const { controller } = await readyController()
+    const parent = await controller.addCategory({ name: '咖啡' })
+
+    await expect(controller.addCategory({ name: '咖啡' })).rejects.toMatchObject({
+      code: 'category_duplicated',
+    })
+    await controller.addCategory({ name: '拿铁', parentId: parent.id })
+    await expect(
+      controller.addCategory({ name: '拿铁', parentId: parent.id }),
+    ).rejects.toMatchObject({ code: 'category_duplicated' })
+    // 不同父下可同名
+    await expect(
+      controller.addCategory({ name: '拿铁', parentId: 'cat-dining' }),
+    ).resolves.toMatchObject({ name: '拿铁' })
+  })
+
+  it('普通成员:分类写操作被领域层拒绝,账本与队列不变', async () => {
+    const { controller, store } = await readyController(XIAOHONG)
+
+    await expect(controller.addCategory({ name: '咖啡' })).rejects.toThrow(/仅管理员/)
+    await expect(controller.updateCategory('cat-dining', { name: '吃饭' })).rejects.toThrow(
+      /仅管理员/,
+    )
+    await expect(controller.deleteCategory('cat-dining-2')).rejects.toThrow(/仅管理员/)
+    expect(controller.getLedger().meta.categories.some((c) => c.name === '咖啡')).toBe(false)
+    await expect(store.loadQueueOps()).resolves.toEqual([])
+  })
+})
