@@ -78,3 +78,34 @@ describe('createRemoteEndpoint', () => {
     expect(deleteLedgerFile).toHaveBeenCalledWith('ledger/months/2026-09.json', 'sha-9')
   })
 })
+
+describe('管理员专属元数据的成员端策略(评审回归)', () => {
+  it('成员会话:分类/预算只拉不推,写操作本地跳过不发请求', async () => {
+    const putLedgerFile = vi.fn(async () => ({ revision: 'sha-x' }))
+    const api = {
+      ...fakeApi({ putLedgerFile }),
+      getSession: () => ({ member: { role: 'member' } }),
+    }
+    const endpoint = createRemoteEndpoint(api)
+
+    await expect(endpoint.putFile('ledger/meta/categories.json', '{}\n')).resolves.toMatchObject({
+      revision: expect.any(String),
+    })
+    await expect(endpoint.deleteFile('ledger/meta/budgets.json')).resolves.toBeUndefined()
+    expect(putLedgerFile).not.toHaveBeenCalled()
+
+    // 月度支出文件不受影响,照常推送
+    await endpoint.putFile('ledger/months/2026-10.json', '{}\n')
+    expect(putLedgerFile).toHaveBeenCalledTimes(1)
+  })
+
+  it('管理员会话:分类元数据照常推送', async () => {
+    const putLedgerFile = vi.fn(async () => ({ revision: 'sha-a' }))
+    const api = {
+      ...fakeApi({ putLedgerFile }),
+      getSession: () => ({ member: { role: 'admin' } }),
+    }
+    await createRemoteEndpoint(api).putFile('ledger/meta/categories.json', '{}\n')
+    expect(putLedgerFile).toHaveBeenCalledTimes(1)
+  })
+})

@@ -10,7 +10,14 @@
 import { ApiError } from '../api/client'
 import { DEFAULT_CATEGORIES, type LedgerData } from '../domain'
 import type { SyncEndpoint } from '../sync'
-import { CATEGORIES_FILE, type PendingQueue, replay, type SyncResult, sync } from '../sync'
+import {
+  CATEGORIES_FILE,
+  type PendingQueue,
+  replay,
+  SyncConflictError,
+  type SyncResult,
+  sync,
+} from '../sync'
 
 export type SyncStatus = 'offline' | 'syncing' | 'synced' | 'error'
 
@@ -80,32 +87,47 @@ export class SyncManager {
   }
 
   private async run(): Promise<SyncResult | null> {
+    let err: unknown
     try {
-      const remoteBefore = await this.deps.endpoint.listFiles()
-      const result = await replay(this.deps.queue, this.deps.ledger, this.deps.endpoint)
-
-      // 首次同步到空远端:远端从未出现过分类文件且本地无分类 → 播种默认分类再推一轮
-      if (!(CATEGORIES_FILE in remoteBefore) && this.deps.ledger.meta.categories.length === 0) {
-        this.deps.ledger.meta.categories = structuredClone(DEFAULT_CATEGORIES)
-        await sync(this.deps.ledger, this.deps.endpoint)
+      return await this.attempt()
+    } catch (firstErr) {
+      err = firstErr
+    }
+    // 乐观并发冲突:重跑一轮(重新 listFiles + 合并)通常即可收敛
+    if (err instanceof SyncConflictError) {
+      try {
+        return await this.attempt()
+      } catch (retryErr) {
+        err = retryErr
       }
-
-      await this.deps.onSynced?.(result)
-      this.setStatus('synced')
-      return result
-    } catch (err) {
-      if (err instanceof ApiError && err.code === 'network_error') {
-        this.setStatus('offline')
-        return null
-      }
-      // fetch 层直接抛 TypeError 的替身(无 ApiError 包装)同样按离线处理
-      if (err instanceof TypeError) {
-        this.setStatus('offline')
-        return null
-      }
-      this.setStatus('error', errorText(err))
+    }
+    if (err instanceof ApiError && err.code === 'network_error') {
+      this.setStatus('offline')
       return null
     }
+    // fetch 层直接抛 TypeError 的替身(无 ApiError 包装)同样按离线处理
+    if (err instanceof TypeError) {
+      this.setStatus('offline')
+      return null
+    }
+    this.setStatus('error', errorText(err))
+    return null
+  }
+
+  /** 一轮「拉取 → 合并 → 推送」;冲突时由 run() 决定是否重试 */
+  private async attempt(): Promise<SyncResult> {
+    const remoteBefore = await this.deps.endpoint.listFiles()
+    const result = await replay(this.deps.queue, this.deps.ledger, this.deps.endpoint)
+
+    // 首次同步到空远端:远端从未出现过分类文件且本地无分类 → 播种默认分类再推一轮
+    if (!(CATEGORIES_FILE in remoteBefore) && this.deps.ledger.meta.categories.length === 0) {
+      this.deps.ledger.meta.categories = structuredClone(DEFAULT_CATEGORIES)
+      await sync(this.deps.ledger, this.deps.endpoint)
+    }
+
+    await this.deps.onSynced?.(result)
+    this.setStatus('synced')
+    return result
   }
 
   private setStatus(status: SyncStatus, error?: string): void {

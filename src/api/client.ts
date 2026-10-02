@@ -221,7 +221,8 @@ export class ApiClient implements LedgerApi {
       const code = typeof body?.error === 'string' ? body.error : 'http_error'
       const message =
         typeof body?.message === 'string' ? body.message : `请求失败(${response.status})`
-      if (response.status === 401) {
+      // 仅对携带会话的已认证请求按「会话过期」处理;未登录探针的 401 不清理会话、不触发过期提示
+      if (response.status === 401 && auth && this.session) {
         this.clearSession()
         this.onUnauthorized()
       }

@@ -188,3 +188,28 @@ describe('SyncManager 首次播种与离线删除回放', () => {
     expect((await endpoint.listFiles())[monthFilePath('2026-10')]).toBeUndefined()
   })
 })
+
+describe('乐观并发冲突自动重跑(评审回归)', () => {
+  it('首轮 SyncConflictError 后自动重跑一轮并收敛为 synced', async () => {
+    const inner = new InMemoryEndpoint()
+    const { SyncConflictError } = await import('../sync')
+    let failOnce = true
+    const endpoint: SyncEndpoint = {
+      listFiles: () => inner.listFiles(),
+      putFile: (path, content, baseRevision) => {
+        if (failOnce) {
+          failOnce = false
+          return Promise.reject(new SyncConflictError(path, '远端文件状态已变化'))
+        }
+        return inner.putFile(path, content, baseRevision)
+      },
+      deleteFile: (path, baseRevision) => inner.deleteFile(path, baseRevision),
+    }
+    const { manager, statuses } = makeManager({ endpoint, ledger: fixtureLedger() })
+
+    await manager.syncNow()
+
+    expect(manager.status).toBe('synced')
+    expect(statuses.at(-1)).toBe('synced')
+  })
+})

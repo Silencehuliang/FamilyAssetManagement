@@ -241,3 +241,24 @@ describe('ApiClient.probeInitialization', () => {
     })
   })
 })
+
+describe('未登录探针的 401(评审回归)', () => {
+  it('不触发会话过期通知、不清空会话', async () => {
+    const storage = memoryStorage()
+    let unauthorized = 0
+    const { impl } = fakeFetch(() =>
+      jsonResponse({ error: 'unauthorized', message: '缺少会话凭据' }, 401),
+    )
+    const client = new ApiClient({
+      baseUrl: BASE,
+      fetchImpl: impl,
+      storage,
+      onUnauthorized: () => {
+        unauthorized += 1
+      },
+    })
+
+    await expect(client.probeInitialization()).resolves.toBe('initialized')
+    expect(unauthorized).toBe(0)
+  })
+})

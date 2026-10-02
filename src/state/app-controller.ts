@@ -20,7 +20,7 @@ import {
 import { DomainError } from '../domain/types'
 import { buildExpenseInput, type EntryForm, ensureCategories } from '../features/entry'
 import type { LocalStore } from '../storage'
-import { PersistentQueue } from '../storage'
+import { MemoryLocalStore, PersistentQueue } from '../storage'
 import type { PendingOp, SyncEndpoint } from '../sync'
 import { createRemoteEndpoint } from '../sync'
 import { SyncManager, type SyncStatus } from './sync'
@@ -79,10 +79,13 @@ export class AppController {
     busy: false,
   }
   private readonly listeners = new Set<() => void>()
+  /** 本地存储;IndexedDB 不可用时退化为内存实现 */
+  private store: LocalStore
 
   constructor(deps: AppControllerDeps) {
     this.deps = deps
-    this.queue = new PersistentQueue(deps.store)
+    this.store = deps.store
+    this.queue = new PersistentQueue(this.store)
     deps.api.setOnUnauthorized?.(() => this.handleUnauthorized())
   }
 
@@ -107,13 +110,20 @@ export class AppController {
   async boot(): Promise<void> {
     if (this.booted) return
     this.booted = true
-    const cachedLedger = await this.deps.store.loadLedger()
-    if (cachedLedger) this.ledger = cachedLedger
-    const cachedMembers = await this.deps.store.loadMembers()
-    if (cachedMembers && this.ledger.meta.members.length === 0) {
-      this.ledger.meta.members = cachedMembers
+    try {
+      const cachedLedger = await this.store.loadLedger()
+      if (cachedLedger) this.ledger = cachedLedger
+      const cachedMembers = await this.store.loadMembers()
+      if (cachedMembers && this.ledger.meta.members.length === 0) {
+        this.ledger.meta.members = cachedMembers
+      }
+      this.queue = await PersistentQueue.hydrate(this.store)
+    } catch (err) {
+      // IndexedDB 不可用(隐私模式/受限环境):退化为内存存储,应用可用但不再跨刷新保留
+      console.error('本地存储不可用,退化为内存模式', err)
+      this.store = new MemoryLocalStore()
+      this.queue = new PersistentQueue(this.store)
     }
-    this.queue = await PersistentQueue.hydrate(this.deps.store)
     this.syncManager = new SyncManager({
       endpoint: this.deps.endpoint ?? createRemoteEndpoint(this.deps.api),
       queue: this.queue,
@@ -211,7 +221,7 @@ export class AppController {
 
   /** 把当前账本写穿到 IndexedDB(领域变更后调用) */
   async persistLedger(): Promise<void> {
-    await this.deps.store.saveLedger(this.ledger)
+    await this.store.saveLedger(this.ledger)
     this.touchLedger()
   }
 
@@ -245,7 +255,7 @@ export class AppController {
   private async enterApp(session: AuthResult | StoredSession): Promise<void> {
     this.setState({ phase: 'ready', member: session.member, busy: false })
     await this.refreshMembers(session.member)
-    await this.deps.store.saveLedger(this.ledger)
+    await this.store.saveLedger(this.ledger)
     this.touchLedger()
     await this.syncManager?.syncNow()
   }
@@ -254,7 +264,7 @@ export class AppController {
     try {
       const members = await this.deps.api.getMembers()
       this.ledger.meta.members = members
-      await this.deps.store.saveMembers(members)
+      await this.store.saveMembers(members)
       this.setState({ members: [...members] })
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
@@ -262,7 +272,7 @@ export class AppController {
         return
       }
       // 离线:沿用本地缓存成员;没有任何缓存时至少放入当前登录成员
-      const cached = await this.deps.store.loadMembers()
+      const cached = await this.store.loadMembers()
       const fallback = cached ?? this.ledger.meta.members
       if (fallback.length > 0) {
         this.ledger.meta.members = fallback
