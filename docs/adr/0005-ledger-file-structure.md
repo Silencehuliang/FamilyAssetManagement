@@ -17,4 +17,5 @@ ledger/meta/recurring.json   {"recurring": [...]}       周期支出规则
 - JSON 用 2 空格缩进、结尾换行,保持人类可读、git diff 友好
 - **标签不单独建文件**,由支出记录上的 `tagNames` 派生
 - 领域类型的 `Member` 不含凭据;存储层以 `MemberRecord = Member & { passwordHash, passwordSalt }` 表示;凭据格式定为 `pbkdf2$sha256$<iterations>$<saltBase64>$<hashBase64>`,盐 ≥16 字节,迭代数 ≥100_000(鉴权层实现)
+- **members.json 由服务端专属管理(不进入客户端同步文件集)**:凭据永不过代理;客户端经 `GET /api/members` 获取去凭据的成员列表填充本地视图(安全评审决策,防离线爆破)
 - 文件路径与内存账本切片( `months[m]`、`meta.*` )的映射在同步层实现;同步仍以文件为增量单位、记录级 LWW(ADR-0004)
