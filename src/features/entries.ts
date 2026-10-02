@@ -129,8 +129,11 @@ export function tagsOfMonth(ledger: LedgerData, month: MonthKey): string[] {
   for (const expense of ledger.months[month]?.expenses ?? []) {
     for (const tag of expense.tagNames) tags.add(tag)
   }
-  return [...tags].sort((a, b) => a.localeCompare(b))
+  return [...tags].sort((a, b) => TAG_COLLATOR.compare(a, b))
 }
+
+/** 显式中文排序:不带 locale 的 localeCompare 随运行环境默认区域变化(CI Ubuntu 与本地 Windows 排序不一致) */
+const TAG_COLLATOR = new Intl.Collator('zh-Hans-CN')
 
 export interface MonthOption {
   month: MonthKey
