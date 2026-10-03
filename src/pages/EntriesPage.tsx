@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import MdiChevronLeft from '~icons/mdi/chevron-left'
 import MdiChevronRight from '~icons/mdi/chevron-right'
-import { useDialog } from '../components/dialog'
-import { EditExpenseDialog } from '../components/EditExpenseDialog'
+import { useBillEditor } from '../components/editor'
 import type { Expense } from '../domain'
+import { categoryColor } from '../features/categories'
 import {
   canEditEntry,
   EMPTY_FILTERS,
@@ -16,7 +16,8 @@ import {
   monthOptions,
   shiftMonth,
   sumCents,
-  tagsOfMonth,
+  type TagFilterGroup,
+  tagFilterGroups,
 } from '../features/entries'
 import { formatCents, groupCategories, resolveCategoryPath, todayKey } from '../features/entry'
 import type { AppController, AppState } from '../state/app-controller'
@@ -26,20 +27,29 @@ import type { AppController, AppState } from '../state/app-controller'
  * 分类/成员/标签/关键词四种筛选可组合、一键清空;
  * 仅对自己有编辑权的记录提供编辑/删除入口(管理员可改任何记录)。
  */
-export function EntriesPage({ controller, state }: { controller: AppController; state: AppState }) {
+export function EntriesPage({
+  controller,
+  state,
+  preset,
+}: {
+  controller: AppController
+  state: AppState
+  /** 统计页跳转预置的筛选(仅初始值,V9) */
+  preset?: Partial<EntryFilters>
+}) {
   const ledger = state.ledger
   const actor = state.member
   const currentMonth = todayKey().slice(0, 7)
-  const { showDialog } = useDialog()
+  const openBillEditor = useBillEditor(controller)
 
   const [month, setMonth] = useState(currentMonth)
-  const [filters, setFilters] = useState<EntryFilters>(EMPTY_FILTERS)
+  const [filters, setFilters] = useState<EntryFilters>(() => ({ ...EMPTY_FILTERS, ...preset }))
 
   const monthExpenses = ledger.months[month]?.expenses ?? []
   const visible = filterExpenses(ledger, monthExpenses, filters)
   const groups = groupByDay(ledger, visible)
   const options = monthOptions(ledger, month, currentMonth)
-  const tags = tagsOfMonth(ledger, month)
+  const filterTagGroups = tagFilterGroups(ledger, month, preset?.tagIds ?? [])
   const { parents, childrenByParent } = groupCategories(ledger.meta.categories)
   const children = filters.parentId ? (childrenByParent[filters.parentId] ?? []) : []
   const filtering = hasActiveFilters(filters)
@@ -47,23 +57,23 @@ export function EntriesPage({ controller, state }: { controller: AppController; 
 
   const openEdit = (expense: Expense): void => {
     if (!actor || !canEditEntry(actor, expense)) return
-    void showDialog<void>(
-      ({ close }) => (
-        <EditExpenseDialog
-          controller={controller}
-          state={state}
-          expense={expense}
-          onClose={() => close(undefined)}
-        />
-      ),
-      { label: '编辑支出' },
-    )
+    // #29:编辑已有支出复用全屏编辑器(与首页/FAB 同一入口)
+    void openBillEditor({ expense })
   }
 
   /** 切月:标签选项按月生成,切月时清掉已选标签避免悬空 */
   const changeMonth = (next: string): void => {
     setMonth(next)
-    setFilters((current) => (current.tag === '' ? current : { ...current, tag: '' }))
+    setFilters((current) => (current.tagIds.length === 0 ? current : { ...current, tagIds: [] }))
+  }
+
+  const toggleTag = (id: string): void => {
+    setFilters((current) => ({
+      ...current,
+      tagIds: current.tagIds.includes(id)
+        ? current.tagIds.filter((tagId) => tagId !== id)
+        : [...current.tagIds, id],
+    }))
   }
 
   return (
@@ -179,21 +189,44 @@ export function EntriesPage({ controller, state }: { controller: AppController; 
           </select>
         </label>
 
-        {tags.length > 0 ? (
-          <label className="field">
-            <span>标签</span>
-            <select
-              value={filters.tag}
-              onChange={(event) => setFilters((f) => ({ ...f, tag: event.target.value }))}
-            >
-              <option value="">全部标签</option>
-              {tags.map((tag) => (
-                <option key={tag} value={tag}>
-                  {tag}
-                </option>
-              ))}
-            </select>
-          </label>
+        {filterTagGroups.length > 0 ? (
+          <div className="tag-filter">
+            <div className="tag-filter-head">
+              <span className="text-[13px] text-muted-foreground">标签</span>
+              <div className="chip-row">
+                <button
+                  type="button"
+                  className={`chip ${filters.tagMode === 'include' ? 'chip-active' : ''}`}
+                  aria-pressed={filters.tagMode === 'include'}
+                  onClick={() => setFilters((f) => ({ ...f, tagMode: 'include' }))}
+                >
+                  包含
+                </button>
+                <button
+                  type="button"
+                  className={`chip ${filters.tagMode === 'exclude' ? 'chip-active' : ''}`}
+                  aria-pressed={filters.tagMode === 'exclude'}
+                  onClick={() => setFilters((f) => ({ ...f, tagMode: 'exclude' }))}
+                >
+                  排除
+                </button>
+              </div>
+            </div>
+            {filterTagGroups.map((group) => (
+              <TagGroupFilter
+                key={group.id}
+                group={group}
+                selectedIds={filters.tagIds}
+                onToggle={toggleTag}
+              />
+            ))}
+            {filters.tagIds.length > 0 ? (
+              <p className="member-meta">
+                已选 {filters.tagIds.length} 个标签 ·{' '}
+                {filters.tagMode === 'include' ? '含任一选中标签' : '剔除带任一选中标签的支出'}
+              </p>
+            ) : null}
+          </div>
         ) : null}
 
         <label className="field">
@@ -242,18 +275,26 @@ export function EntriesPage({ controller, state }: { controller: AppController; 
                       title={editable ? '点击编辑' : '只能编辑自己记录的支出'}
                       onClick={() => openEdit(expense)}
                     >
-                      <span className="entry-category">
+                      <span className="entry-category inline-flex items-center gap-1.5">
+                        <span
+                          className="size-2.5 shrink-0 rounded-full"
+                          style={{ background: categoryColor(ledger, expense.categoryId) }}
+                          aria-hidden="true"
+                        />
                         {resolveCategoryPath(ledger, expense.categoryId)}
                       </span>
                       <span className="entry-meta">
                         {memberNameOf(ledger, expense.memberId)}
                         {expense.note ? ` · ${expense.note}` : ''}
                       </span>
-                      {expense.tagNames.length > 0 ? (
+                      {expense.tagChips.length > 0 ? (
                         <span className="entry-tags">
-                          {expense.tagNames.map((tag) => (
-                            <span key={tag} className="entry-tag">
-                              #{tag}
+                          {expense.tagChips.map((chip) => (
+                            <span
+                              key={chip.id}
+                              className={`entry-tag ${chip.color ? `entry-tag-${chip.color}` : ''}`}
+                            >
+                              #{chip.name}
                             </span>
                           ))}
                         </span>
@@ -268,5 +309,52 @@ export function EntriesPage({ controller, state }: { controller: AppController; 
         ))
       )}
     </div>
+  )
+}
+
+/** 按标签组折叠展示的筛选 chips(V10):组色圆点 + 组内多选,默认展开 */
+function TagGroupFilter({
+  group,
+  selectedIds,
+  onToggle,
+}: {
+  group: TagFilterGroup
+  selectedIds: string[]
+  onToggle: (id: string) => void
+}) {
+  const [open, setOpen] = useState(true)
+  const selected = group.tags.filter((tag) => selectedIds.includes(tag.id)).length
+
+  return (
+    <details
+      className="tag-filter-group"
+      open={open}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary>
+        {group.color ? (
+          <span
+            className="legend-dot"
+            style={{ background: `var(--tag-${group.color})` }}
+            aria-hidden="true"
+          />
+        ) : null}
+        <span className="min-w-0 flex-1 truncate">{group.name}</span>
+        {selected > 0 ? <span className="text-muted-foreground">已选 {selected}</span> : null}
+      </summary>
+      <div className="chip-row">
+        {group.tags.map((tag) => (
+          <button
+            key={tag.id}
+            type="button"
+            className={`chip ${selectedIds.includes(tag.id) ? 'chip-active' : ''}`}
+            aria-pressed={selectedIds.includes(tag.id)}
+            onClick={() => onToggle(tag.id)}
+          >
+            #{tag.name}
+          </button>
+        ))}
+      </div>
+    </details>
   )
 }

@@ -456,6 +456,67 @@
     @apply rounded-full bg-muted px-2 py-px text-[11px] text-muted-foreground;
   }
 
+  /* 行内标签 chip 组色(V10):浅色底 + 组色文字,与标签组色板一致 */
+  .entry-tag-red {
+    background: color-mix(in srgb, var(--tag-red) 16%, transparent);
+    color: var(--tag-red);
+  }
+
+  .entry-tag-orange {
+    background: color-mix(in srgb, var(--tag-orange) 16%, transparent);
+    color: var(--tag-orange);
+  }
+
+  .entry-tag-yellow {
+    background: color-mix(in srgb, var(--tag-yellow) 18%, transparent);
+    color: var(--tag-yellow);
+  }
+
+  .entry-tag-green {
+    background: color-mix(in srgb, var(--tag-green) 16%, transparent);
+    color: var(--tag-green);
+  }
+
+  .entry-tag-blue {
+    background: color-mix(in srgb, var(--tag-blue) 16%, transparent);
+    color: var(--tag-blue);
+  }
+
+  .entry-tag-purple {
+    background: color-mix(in srgb, var(--tag-purple) 16%, transparent);
+    color: var(--tag-purple);
+  }
+
+  .entry-tag-gray {
+    background: color-mix(in srgb, var(--tag-gray) 16%, transparent);
+    color: var(--tag-gray);
+  }
+
+  /* 标签筛选(V10):按组折叠 + 包含/排除 */
+  .tag-filter {
+    @apply mt-3;
+  }
+
+  .tag-filter-head {
+    @apply flex items-center justify-between gap-2;
+  }
+
+  .tag-filter-group {
+    @apply mt-2 border-t border-border pt-2;
+  }
+
+  .tag-filter-group summary {
+    @apply flex cursor-pointer list-none items-center gap-1.5 text-[13px] text-muted-foreground;
+  }
+
+  .tag-filter-group summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .tag-filter-group .chip-row {
+    @apply mt-2;
+  }
+
   .entry-amount {
     @apply shrink-0 text-[15px] font-semibold tabular-nums;
   }
@@ -494,10 +555,75 @@
   }
 
   .category-child-row {
-    @apply flex items-center justify-between gap-2 border-t border-border py-2 text-sm;
+    @apply flex flex-wrap items-center gap-2 border-t border-border py-2 text-sm;
   }
 
-  /* 统计页:手写 SVG 图表保留,色板走令牌 */
+  /* 分类管理(V8):就地编辑、拖拽把手与配色 */
+  .category-card {
+    @apply relative;
+  }
+
+  .category-dragging {
+    @apply relative z-10 opacity-70;
+  }
+
+  .drag-handle {
+    @apply -ml-1 flex size-8 shrink-0 touch-none items-center justify-center rounded-md border-0 bg-transparent p-0 text-muted-foreground;
+  }
+
+  .category-inline-row {
+    @apply mt-2.5 border-t border-border pt-2;
+  }
+
+  .category-notice {
+    @apply mb-0 w-full;
+  }
+
+  .category-migrate {
+    @apply w-full;
+  }
+
+  .category-migrate-controls {
+    @apply mt-2 flex flex-wrap items-center gap-2.5;
+  }
+
+  .category-migrate-controls select {
+    @apply rounded-md border border-input bg-background px-2.5 py-1.5 text-[13px] text-foreground;
+  }
+
+  .color-swatch {
+    @apply size-6 shrink-0 rounded-full border-2 border-background p-0 ring-1 ring-border;
+  }
+
+  .color-palette {
+    @apply absolute top-8 left-0 z-30 flex gap-1.5 rounded-lg border border-border bg-card p-2 shadow-lg;
+  }
+
+  .color-option {
+    @apply size-6 rounded-full border-2 border-transparent p-0;
+  }
+
+  .color-option-active {
+    @apply border-foreground;
+  }
+
+  .inline-edit {
+    @apply flex w-full items-center gap-2;
+  }
+
+  .inline-edit-input {
+    @apply box-border w-full min-w-0 flex-1 rounded-md border border-input bg-background px-3 py-2 text-[15px] text-foreground;
+  }
+
+  .inline-edit-input-compact {
+    @apply px-2.5 py-1.5 text-[13px];
+  }
+
+  .inline-edit-input:focus {
+    @apply border-ring outline-none ring-2 ring-ring/30;
+  }
+
+  /* 统计页(V9,ECharts):图表容器与标签明细 */
   .stats-range-hint {
     @apply mt-3;
   }
@@ -514,69 +640,41 @@
     @apply px-2.5 py-1 text-xs;
   }
 
-  .chart-svg {
-    @apply mt-2.5 block h-auto w-full;
+  .chart-canvas {
+    @apply mt-2.5 w-full;
   }
 
-  .chart-bar {
-    fill: var(--chart-1);
+  .stats-drill-bar {
+    @apply mt-2 mb-1 flex items-center justify-between gap-2 text-[13px];
   }
 
-  .chart-bar-empty {
-    fill: var(--border);
+  .tag-detail-list {
+    @apply mt-1;
   }
 
-  .chart-label,
-  .chart-value {
-    fill: var(--muted-foreground);
-    font-size: 10px;
+  .tag-detail-group + .tag-detail-group {
+    @apply mt-3;
   }
 
-  .chart-value {
-    font-variant-numeric: tabular-nums;
+  .tag-detail-group-head {
+    @apply flex items-center gap-2 text-[13px] font-medium;
   }
 
-  .donut {
-    @apply mx-auto mt-2.5 max-w-[216px];
+  .tag-detail-group ul {
+    @apply m-0 list-none p-0;
   }
 
-  .donut-total {
-    fill: var(--foreground);
-    font-size: 14px;
-    font-weight: 600;
+  .tag-detail-row {
+    @apply flex w-full appearance-none items-center gap-2 border-t border-border bg-transparent py-1.5 pl-6 text-left text-[13px] text-inherit;
   }
 
-  .donut-caption {
-    fill: var(--muted-foreground);
-    font-size: 10px;
+  .tag-detail-row:disabled {
+    @apply cursor-default;
   }
 
-  .legend-list {
-    @apply mt-3.5 list-none p-0;
-  }
-
-  .legend-item {
-    @apply flex items-center gap-2 border-t border-border py-1.5 text-[13px];
-  }
-
-  .legend-item:first-child {
-    @apply border-t-0 pt-0;
-  }
-
+  /* 进度条/占比条(预算页与标签明细共用) */
   .legend-dot {
     @apply size-2.5 shrink-0 rounded-sm;
-  }
-
-  .legend-name {
-    @apply min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap;
-  }
-
-  .legend-amount {
-    @apply tabular-nums;
-  }
-
-  .legend-percent {
-    @apply w-12 text-right tabular-nums text-muted-foreground;
   }
 
   .bar-list {
@@ -597,14 +695,6 @@
 
   .bar-amount {
     @apply tabular-nums text-muted-foreground;
-  }
-
-  .bar-track {
-    @apply mt-1.5 h-2 overflow-hidden rounded-full border border-border bg-background;
-  }
-
-  .bar-fill {
-    @apply h-full rounded-full bg-primary;
   }
 
   /* 预算页 */

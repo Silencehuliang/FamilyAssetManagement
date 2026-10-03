@@ -4,6 +4,7 @@ import {
   childrenOf,
   deleteCategory,
   parentCategories,
+  reorderCategories,
   updateCategory,
 } from './categories'
 import { DEFAULT_CATEGORIES } from './defaults'
@@ -97,5 +98,133 @@ describe('分类查询辅助', () => {
     expect(parents[0]?.name).toBe('餐饮')
     const diningChildren = childrenOf(ledger, 'cat-dining')
     expect(diningChildren.map((c) => c.name)).toEqual(['早餐', '午餐', '晚餐', '外卖', '零食饮料'])
+  })
+})
+
+describe('分类颜色(V8,仅管理员)', () => {
+  it('新增/修改可保存 7 色之一;成员被拒', () => {
+    const ledger = fixtureLedger()
+
+    addCategory(ledger, ADMIN, { id: 'cat-coffee', name: '咖啡', color: 'purple' })
+    expect(ledger.meta.categories.find((c) => c.id === 'cat-coffee')?.color).toBe('purple')
+
+    updateCategory(ledger, ADMIN, 'cat-coffee', { color: 'green' })
+    expect(ledger.meta.categories.find((c) => c.id === 'cat-coffee')?.color).toBe('green')
+
+    expect(() =>
+      addCategory(ledger, XIAOHONG, { id: 'cat-x', name: '爱好', color: 'red' }),
+    ).toThrowError(DomainError)
+  })
+
+  it('调色板外的颜色被拒(invalid_color),不写入账本', () => {
+    const ledger = fixtureLedger()
+    expect(() =>
+      addCategory(ledger, ADMIN, {
+        id: 'cat-bad',
+        name: '坏色',
+        color: 'pink' as unknown as 'red',
+      }),
+    ).toThrowError(/不支持/)
+    expect(() =>
+      updateCategory(ledger, ADMIN, 'cat-dining', { color: 'pink' as unknown as 'red' }),
+    ).toThrowError(/不支持/)
+    expect(ledger.meta.categories.find((c) => c.id === 'cat-dining')?.color).toBeUndefined()
+  })
+
+  it('子分类不允许带色(color_parent_only),父分类色不受影响', () => {
+    const ledger = fixtureLedger()
+
+    let addCode: string | undefined
+    try {
+      addCategory(ledger, ADMIN, {
+        id: 'cat-child-color',
+        name: '子色',
+        parentId: 'cat-dining',
+        color: 'red',
+      })
+    } catch (error) {
+      addCode = error instanceof DomainError ? error.code : undefined
+    }
+    expect(addCode).toBe('color_parent_only')
+    expect(ledger.meta.categories.some((c) => c.id === 'cat-child-color')).toBe(false)
+
+    // 父分类仍可正常设色
+    updateCategory(ledger, ADMIN, 'cat-dining', { color: 'blue' })
+    expect(ledger.meta.categories.find((c) => c.id === 'cat-dining')?.color).toBe('blue')
+
+    let updateCode: string | undefined
+    try {
+      updateCategory(ledger, ADMIN, LUNCH_CATEGORY, { color: 'red' })
+    } catch (error) {
+      updateCode = error instanceof DomainError ? error.code : undefined
+    }
+    expect(updateCode).toBe('color_parent_only')
+    expect(ledger.meta.categories.find((c) => c.id === LUNCH_CATEGORY)?.color).toBeUndefined()
+  })
+})
+
+describe('reorderCategories(拖拽排序,仅管理员)', () => {
+  it('父分类按给定顺序重写 sortOrder,子分类不受影响', () => {
+    const ledger = fixtureLedger()
+    const ids = parentCategories(ledger).map((c) => c.id)
+    const reversed = [...ids].reverse()
+
+    reorderCategories(ledger, ADMIN, null, reversed)
+
+    expect(parentCategories(ledger).map((c) => c.id)).toEqual(reversed)
+    expect(parentCategories(ledger).map((c) => c.sortOrder)).toEqual(
+      reversed.map((_, index) => index),
+    )
+    // 子分类位次原样保留
+    expect(childrenOf(ledger, 'cat-dining').map((c) => c.name)).toEqual([
+      '早餐',
+      '午餐',
+      '晚餐',
+      '外卖',
+      '零食饮料',
+    ])
+  })
+
+  it('子分类排序限定同一父分类,其他父分类的子分类顺序不变', () => {
+    const ledger = fixtureLedger()
+    const diningIds = childrenOf(ledger, 'cat-dining').map((c) => c.id)
+    const shuffled = [
+      diningIds[2],
+      diningIds[0],
+      diningIds[4],
+      diningIds[1],
+      diningIds[3],
+    ] as string[]
+
+    reorderCategories(ledger, ADMIN, 'cat-dining', shuffled)
+
+    expect(childrenOf(ledger, 'cat-dining').map((c) => c.id)).toEqual(shuffled)
+    expect(childrenOf(ledger, 'cat-transport').map((c) => c.name)).toEqual([
+      '公共交通',
+      '打车',
+      '加油',
+      '停车过路',
+    ])
+  })
+
+  it('列表不完整/含重复/跨父时拒绝(category_reorder_mismatch),排序不变', () => {
+    const ledger = fixtureLedger()
+    const before = parentCategories(ledger).map((c) => c.id)
+
+    expect(() => reorderCategories(ledger, ADMIN, null, before.slice(0, 3))).toThrowError(/排序/)
+    expect(() =>
+      reorderCategories(ledger, ADMIN, null, [...before, before[0] as string]),
+    ).toThrowError(/排序/)
+    // 子分类列表里混入父分类 id 同样被拒
+    expect(() =>
+      reorderCategories(ledger, ADMIN, 'cat-dining', ['cat-transport', 'cat-dining-1']),
+    ).toThrowError(/排序/)
+    expect(parentCategories(ledger).map((c) => c.id)).toEqual(before)
+  })
+
+  it('普通成员无权排序', () => {
+    const ledger = fixtureLedger()
+    const ids = parentCategories(ledger).map((c) => c.id)
+    expect(() => reorderCategories(ledger, XIAOHONG, null, ids)).toThrowError(/仅管理员/)
   })
 })

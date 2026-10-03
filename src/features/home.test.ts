@@ -4,7 +4,6 @@ import { ADMIN, fixtureLedger, LUNCH_CATEGORY, XIAOHONG } from '../domain/fixtur
 import {
   activeDotIndex,
   budgetWidget,
-  categoryAccent,
   homeBillGroups,
   homeDayLabel,
   homeDonut,
@@ -168,15 +167,6 @@ describe('homeDayLabel(日期标签)', () => {
     expect(homeDayLabel('2026-10-02', '2026-10-03')).toBe('昨天')
     expect(homeDayLabel('2026-09-30', '2026-10-01')).toBe('昨天')
     expect(homeDayLabel('2026-09-20', '2026-10-03')).toBe('9月20日 周日')
-  })
-})
-
-describe('categoryAccent(分类色块)', () => {
-  it('父分类按排序取 chart 色板,未知分类回退 gray', () => {
-    const ledger = fixtureLedger()
-    expect(categoryAccent(ledger, LUNCH_CATEGORY)).toBe('var(--chart-1)')
-    expect(categoryAccent(ledger, 'cat-housing-1')).toBe('var(--chart-4)')
-    expect(categoryAccent(ledger, 'cat-missing')).toBe('var(--tag-gray)')
   })
 })
 

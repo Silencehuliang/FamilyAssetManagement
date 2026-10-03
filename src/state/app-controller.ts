@@ -50,10 +50,12 @@ import {
   type RecurringPatch,
   removeRecurring as removeRecurringInLedger,
   renameTag as renameTagInLedger,
+  reorderCategories as reorderCategoriesInLedger,
   setCategoryBudget as setCategoryBudgetInLedger,
   setTagGroupOrder as setTagGroupOrderInLedger,
   setTotalBudget as setTotalBudgetInLedger,
   type Tag,
+  type TagColor,
   type TagGroup,
   type TagGroupId,
   type TagGroupInput,
@@ -430,10 +432,14 @@ export class AppController {
   }
 
   /**
-   * 新增分类(T8,仅管理员;领域层二次门禁):parentId 缺省为父分类,
-   * 排序位次取同级最大 + 1,写穿本地并触发同步。
+   * 新增分类(T8/V8,仅管理员;领域层二次门禁):parentId 缺省为父分类,
+   * 排序位次取同级最大 + 1,可选 7 色之一作父分类色,写穿本地并触发同步。
    */
-  async addCategory(input: { name: string; parentId?: CategoryId }): Promise<Category> {
+  async addCategory(input: {
+    name: string
+    parentId?: CategoryId
+    color?: TagColor
+  }): Promise<Category> {
     const actor = this.currentActor()
     const name = input.name.trim()
     if (name === '') throw new DomainError('invalid_name', '请输入分类名称')
@@ -443,6 +449,7 @@ export class AppController {
       name,
       parentId: input.parentId,
       sortOrder: nextSortOrder(this.ledger, input.parentId),
+      color: input.color,
     })
     const created = this.ledger.meta.categories.find((c) => c.id === id)
     if (!created) throw new Error('新增分类后未找到记录')
@@ -451,10 +458,10 @@ export class AppController {
     return created
   }
 
-  /** 重命名分类或调整排序(T8,仅管理员) */
+  /** 重命名/调整排序/设置颜色(V8,仅管理员) */
   async updateCategory(
     id: CategoryId,
-    patch: { name?: string; sortOrder?: number },
+    patch: { name?: string; sortOrder?: number; color?: TagColor },
   ): Promise<void> {
     const actor = this.currentActor()
     const next = { ...patch }
@@ -464,6 +471,18 @@ export class AppController {
       next.name = name
     }
     updateCategoryInLedger(this.ledger, actor, id, next)
+    await this.persistLedger()
+    void this.syncManager?.syncNow()
+  }
+
+  /**
+   * 分类拖拽排序(V8,仅管理员):把同层级的 sortOrder 按 orderedIds 重写。
+   * 分类是文件级数据(管理员 local-wins / 成员 remote-wins),无需离线队列,
+   * 与改名/颜色一样写穿本地后触发同步即可。
+   */
+  async reorderCategories(parentId: CategoryId | null, orderedIds: CategoryId[]): Promise<void> {
+    const actor = this.currentActor()
+    reorderCategoriesInLedger(this.ledger, actor, parentId, orderedIds)
     await this.persistLedger()
     void this.syncManager?.syncNow()
   }

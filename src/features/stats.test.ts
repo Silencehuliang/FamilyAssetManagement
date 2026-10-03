@@ -1,13 +1,34 @@
 import { describe, expect, it } from 'vitest'
-import { addExpense, type LedgerData } from '../domain'
-import { ADMIN, fixtureLedger, LUNCH_CATEGORY, NOW, nextId, XIAOHONG } from '../domain/fixtures'
 import {
+  addCategory,
+  addExpense,
+  type LedgerData,
+  type TagGroup,
+  type TagId,
+  tagIdFromName,
+} from '../domain'
+import {
+  ADMIN,
+  DINNER_CATEGORY,
+  fixtureLedger,
+  LUNCH_CATEGORY,
+  NOW,
+  nextId,
+  XIAOHONG,
+} from '../domain/fixtures'
+import {
+  categoryChildrenShare,
   categoryShare,
   MERGED_CATEGORY_ID,
   memberShare,
   monthsInRange,
   monthTrend,
+  tagDetailGroups,
+  tagGroupSlices,
+  tagSlices,
   trendTotalCents,
+  UNGROUPED_GROUP_ID,
+  UNTAGGED_SLICE_ID,
 } from './stats'
 
 function add(
@@ -80,7 +101,7 @@ describe('categoryShare', () => {
     ])
   })
 
-  it('子级视图按子分类展示,父分类不参与', () => {
+  it('子级视图按子分类展示,父分类不参与;分片名用「父/子」全路径', () => {
     const slices = categoryShare(seeded(), ['2026-10'], 'child')
 
     expect(slices.map((slice) => slice.id)).toEqual([
@@ -88,7 +109,21 @@ describe('categoryShare', () => {
       'cat-transport-2',
       'cat-dining-3',
     ])
-    expect(slices[0]).toMatchObject({ name: '午餐', totalCents: 3000 })
+    expect(slices[0]).toMatchObject({ name: '餐饮/午餐', totalCents: 3000 })
+  })
+
+  it('不同父分类下的同名子分类用全路径区分,图例/图表不互相覆盖', () => {
+    const ledger = fixtureLedger()
+    addCategory(ledger, ADMIN, { id: 'cat-dining-6', name: '咖啡', parentId: 'cat-dining' })
+    addCategory(ledger, ADMIN, { id: 'cat-fun-4', name: '咖啡', parentId: 'cat-fun' })
+    add(ledger, 3000, '2026-10-01', 'cat-dining-6')
+    add(ledger, 1000, '2026-10-02', 'cat-fun-4')
+
+    const slices = categoryShare(ledger, ['2026-10'], 'child')
+
+    expect(slices.map((slice) => slice.id)).toEqual(['cat-dining-6', 'cat-fun-4'])
+    expect(slices.map((slice) => slice.name)).toEqual(['餐饮/咖啡', '娱乐/咖啡'])
+    expect(new Set(slices.map((slice) => slice.name)).size).toBe(slices.length)
   })
 
   it('超过 topN 的尾部合并为「其他」,percent 仍按全量计算', () => {
@@ -175,5 +210,204 @@ describe('memberShare', () => {
 
   it('无人记账时返回空数组', () => {
     expect(memberShare(fixtureLedger(), ['2026-10'])).toEqual([])
+  })
+})
+
+describe('categoryChildrenShare(分类下钻)', () => {
+  it('只聚合该父分类下的子分类,percent 与父级视图同口径', () => {
+    const ledger = fixtureLedger()
+    add(ledger, 3000, '2026-10-01', LUNCH_CATEGORY)
+    add(ledger, 1000, '2026-10-02', DINNER_CATEGORY)
+    add(ledger, 2000, '2026-10-03', 'cat-transport-2') // 其他父分类,不参与
+
+    const slices = categoryChildrenShare(ledger, ['2026-10'], 'cat-dining')
+
+    expect(slices).toEqual([
+      { id: LUNCH_CATEGORY, name: '午餐', totalCents: 3000, percent: 50 },
+      { id: DINNER_CATEGORY, name: '晚餐', totalCents: 1000, percent: 16.7 },
+    ])
+    expect(categoryChildrenShare(ledger, ['2026-10'], 'cat-missing')).toEqual([])
+  })
+})
+
+/** 带标签实体与标签组的账本:微信/现金 ∈ 支付方式(blue),日用 未分组 */
+async function taggedLedger(): Promise<{
+  ledger: LedgerData
+  wechat: TagId
+  cash: TagId
+  daily: TagId
+}> {
+  const ledger = fixtureLedger()
+  const wechat = await tagIdFromName('微信')
+  const cash = await tagIdFromName('现金')
+  const daily = await tagIdFromName('日用')
+  ledger.meta.tags = [
+    { id: wechat, name: '微信', updatedAt: NOW },
+    { id: cash, name: '现金', updatedAt: NOW },
+    { id: daily, name: '日用', updatedAt: NOW },
+  ]
+  const payment: TagGroup = {
+    id: 'grp-pay',
+    name: '支付方式',
+    color: 'blue',
+    tagIds: [wechat, cash],
+    singleSelect: true,
+  }
+  ledger.meta.tagGroups = [payment]
+
+  const record = (amountCents: number, date: string, categoryId: string, tagIds: TagId[]) => {
+    addExpense(
+      ledger,
+      { amountCents, date, categoryId, tagIds },
+      { actor: XIAOHONG, now: NOW, newId: nextId() },
+    )
+  }
+  record(1000, '2026-10-01', LUNCH_CATEGORY, [wechat])
+  record(2000, '2026-10-02', DINNER_CATEGORY, [cash, daily]) // 一鱼两标签
+  record(500, '2026-10-03', LUNCH_CATEGORY, []) // 未标记
+  record(300, '2026-09-30', LUNCH_CATEGORY, [wechat]) // 范围外
+  return { ledger, wechat, cash, daily }
+}
+
+describe('tagGroupSlices / tagSlices(标签维度,V9)', () => {
+  it('按组聚合:组色着色,未归组进「未分组」,无标签进「未标记」,金额降序', async () => {
+    const { ledger } = await taggedLedger()
+
+    const slices = tagGroupSlices(ledger, ['2026-10'])
+
+    expect(slices).toEqual([
+      {
+        id: 'grp-pay',
+        name: '支付方式',
+        totalCents: 3000,
+        count: 2,
+        percent: 85.7,
+        color: 'var(--tag-blue)',
+      },
+      {
+        id: UNGROUPED_GROUP_ID,
+        name: '未分组',
+        totalCents: 2000,
+        count: 1,
+        percent: 57.1,
+        color: 'var(--tag-gray)',
+      },
+      {
+        id: UNTAGGED_SLICE_ID,
+        name: '未标记',
+        totalCents: 500,
+        count: 1,
+        percent: 14.3,
+        color: 'var(--muted-foreground)',
+      },
+    ])
+  })
+
+  it('超过 topN 的尾部合并「其他」;范围内无数据返回空数组', async () => {
+    const { ledger } = await taggedLedger()
+
+    const merged = tagGroupSlices(ledger, ['2026-10'], 2)
+    expect(merged.map((slice) => slice.id)).toEqual([
+      'grp-pay',
+      UNGROUPED_GROUP_ID,
+      MERGED_CATEGORY_ID,
+    ])
+    expect(merged[2]).toMatchObject({ name: '其他', totalCents: 500, count: 1, percent: 14.3 })
+
+    expect(tagGroupSlices(ledger, ['2026-08'])).toEqual([])
+    expect(tagGroupSlices(fixtureLedger(), ['2026-10'])).toEqual([])
+  })
+
+  it('下钻到组内标签;未分组合成组列出无组标签;未知组返回空', async () => {
+    const { ledger, wechat, cash, daily } = await taggedLedger()
+
+    const pay = tagSlices(ledger, ['2026-10'], 'grp-pay')
+    expect(pay).toEqual([
+      {
+        id: cash,
+        name: '现金',
+        totalCents: 2000,
+        count: 1,
+        percent: 57.1,
+        color: 'var(--tag-blue)',
+      },
+      {
+        id: wechat,
+        name: '微信',
+        totalCents: 1000,
+        count: 1,
+        percent: 28.6,
+        color: 'var(--tag-blue)',
+      },
+    ])
+
+    expect(tagSlices(ledger, ['2026-10'], UNGROUPED_GROUP_ID)).toEqual([
+      {
+        id: daily,
+        name: '日用',
+        totalCents: 2000,
+        count: 1,
+        percent: 57.1,
+        color: 'var(--tag-gray)',
+      },
+    ])
+    expect(tagSlices(ledger, ['2026-10'], 'grp-missing')).toEqual([])
+  })
+
+  it('悬空 tagId 静默过滤并按未标记处理(不计入任何标签/组)', async () => {
+    const ledger = fixtureLedger()
+    // 实体被删除后的悬空引用:绕过领域校验直接注入(与 categoryShare 的旧数据用例一致)
+    ledger.months['2026-10'] = {
+      expenses: [
+        {
+          id: 'e-dangling',
+          amountCents: 800,
+          date: '2026-10-01',
+          categoryId: LUNCH_CATEGORY,
+          tagIds: ['tag-missing'],
+          tagNames: [],
+          memberId: XIAOHONG.id,
+          recordedBy: XIAOHONG.id,
+          createdAt: NOW,
+          updatedAt: NOW,
+        },
+      ],
+    }
+
+    const slices = tagGroupSlices(ledger, ['2026-10'])
+    expect(slices).toEqual([
+      {
+        id: UNTAGGED_SLICE_ID,
+        name: '未标记',
+        totalCents: 800,
+        count: 1,
+        percent: 100,
+        color: 'var(--muted-foreground)',
+      },
+    ])
+  })
+})
+
+describe('tagDetailGroups(标签明细表,V9)', () => {
+  it('组 → 标签两行列金额/笔数/占比,组按金额降序,行按金额降序', async () => {
+    const { ledger, wechat, cash, daily } = await taggedLedger()
+
+    const groups = tagDetailGroups(ledger, ['2026-10'])
+
+    expect(groups.map((group) => group.id)).toEqual(['grp-pay', UNGROUPED_GROUP_ID])
+    expect(groups[0]).toMatchObject({
+      name: '支付方式',
+      color: 'var(--tag-blue)',
+      totalCents: 3000,
+      count: 2,
+    })
+    expect(groups[0]?.rows).toEqual([
+      { tagId: cash, name: '现金', totalCents: 2000, count: 1, percent: 57.1 },
+      { tagId: wechat, name: '微信', totalCents: 1000, count: 1, percent: 28.6 },
+    ])
+    expect(groups[1]?.rows).toEqual([
+      { tagId: daily, name: '日用', totalCents: 2000, count: 1, percent: 57.1 },
+    ])
+    expect(tagDetailGroups(fixtureLedger(), ['2026-10'])).toEqual([])
   })
 })

@@ -4,6 +4,7 @@ import { AppNav, type AppRoute } from './components/AppNav'
 import { useBillEditor } from './components/editor'
 import { SyncBadge } from './components/SyncBadge'
 import { useTheme } from './components/theme'
+import type { EntryFilters } from './features/entries'
 import { BudgetPage } from './pages/BudgetPage'
 import { CategoriesPage } from './pages/CategoriesPage'
 import { EntriesPage } from './pages/EntriesPage'
@@ -65,9 +66,18 @@ function Shell({ state }: { state: AppState }) {
   const [route, setRoute] = useState<AppRoute>('home')
   const [view, setView] = useState<'categories' | 'members' | 'recurring' | null>(null)
   const openBillEditor = useBillEditor(appController)
+  /** 统计页下钻跳转明细时携带的筛选预置(V9) */
+  const [entryPreset, setEntryPreset] = useState<Partial<EntryFilters> | null>(null)
 
   const navigate = (next: AppRoute): void => {
     setRoute(next)
+    setView(null)
+    setEntryPreset(null)
+  }
+
+  const openEntriesWith = (filters: Partial<EntryFilters>): void => {
+    setEntryPreset(filters)
+    setRoute('entries')
     setView(null)
   }
 
@@ -106,9 +116,15 @@ function Shell({ state }: { state: AppState }) {
                 />
               ) : null}
               {route === 'entries' ? (
-                <EntriesPage controller={appController} state={state} />
+                <EntriesPage
+                  controller={appController}
+                  state={state}
+                  preset={entryPreset ?? undefined}
+                />
               ) : null}
-              {route === 'stats' ? <StatsPage state={state} /> : null}
+              {route === 'stats' ? (
+                <StatsPage state={state} onOpenEntries={openEntriesWith} />
+              ) : null}
               {route === 'budget' ? <BudgetPage controller={appController} state={state} /> : null}
               {route === 'me' ? (
                 <MePage

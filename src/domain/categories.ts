@@ -1,5 +1,6 @@
 import { findCategory } from './lookup'
-import type { Category, CategoryId, LedgerData, Member } from './types'
+import { isTagColor } from './tags'
+import type { Category, CategoryId, LedgerData, Member, TagColor } from './types'
 import { DomainError } from './types'
 
 export function isChild(category: Category): boolean {
@@ -21,15 +22,31 @@ export interface CategoryInput {
   name: string
   parentId?: CategoryId
   sortOrder?: number
+  /** 仅父分类可带颜色;7 色调色板之一 */
+  color?: TagColor
 }
 
 function requireAdmin(actor: Member): void {
   if (actor.role !== 'admin') throw new DomainError('forbidden', '仅管理员可管理分类')
 }
 
+function validatedColor(color: TagColor | undefined): TagColor | undefined {
+  if (color === undefined) return undefined
+  if (!isTagColor(color)) throw new DomainError('invalid_color', `不支持的分类颜色:${color}`)
+  return color
+}
+
+/** 颜色归属校验:颜色只能设置在父分类上(子分类继承父分类色) */
+function requireParentOnlyColor(isChildCategory: boolean, color: TagColor | undefined): void {
+  if (isChildCategory && color !== undefined) {
+    throw new DomainError('color_parent_only', '颜色只能设置在父分类上')
+  }
+}
+
 export function addCategory(ledger: LedgerData, actor: Member, input: CategoryInput): LedgerData {
   requireAdmin(actor)
   if (input.parentId !== undefined) findCategory(ledger, input.parentId)
+  requireParentOnlyColor(input.parentId !== undefined, input.color)
   if (ledger.meta.categories.some((c) => c.name === input.name && c.parentId === input.parentId)) {
     throw new DomainError('category_duplicated', `同级下已存在同名分类:${input.name}`)
   }
@@ -39,6 +56,7 @@ export function addCategory(ledger: LedgerData, actor: Member, input: CategoryIn
     name: input.name,
     parentId: input.parentId,
     sortOrder,
+    color: validatedColor(input.color),
   })
   return ledger
 }
@@ -47,10 +65,11 @@ export function updateCategory(
   ledger: LedgerData,
   actor: Member,
   id: CategoryId,
-  patch: { name?: string; sortOrder?: number },
+  patch: { name?: string; sortOrder?: number; color?: TagColor },
 ): LedgerData {
   requireAdmin(actor)
   const category = findCategory(ledger, id)
+  requireParentOnlyColor(isChild(category), patch.color)
   if (
     patch.name !== undefined &&
     ledger.meta.categories.some(
@@ -59,8 +78,43 @@ export function updateCategory(
   ) {
     throw new DomainError('category_duplicated', `同级下已存在同名分类:${patch.name}`)
   }
-  const next = { ...category, ...patch }
+  const next = { ...category, ...patch, color: validatedColor(patch.color ?? category.color) }
   ledger.meta.categories = ledger.meta.categories.map((c) => (c.id === id ? next : c))
+  return ledger
+}
+
+/**
+ * 拖拽排序(仅管理员,纯函数):把同一父分类下的子分类(或全部父分类,parentId=null)
+ * 按 orderedIds 重写 sortOrder(下标即新位次)。要求 orderedIds 恰好是该层级的完整
+ * 集合(成员存在、同父、不重复、不漏项),否则抛 category_reorder_mismatch ——
+ * 部分列表会留下未定义顺序,界面拖拽传入的始终是完整层级,严格校验避免脏数据。
+ */
+export function reorderCategories(
+  ledger: LedgerData,
+  actor: Member,
+  parentId: CategoryId | null,
+  orderedIds: readonly CategoryId[],
+): LedgerData {
+  requireAdmin(actor)
+  const siblings = ledger.meta.categories.filter((c) =>
+    parentId === null ? !isChild(c) : c.parentId === parentId,
+  )
+  const siblingIds = new Set(siblings.map((c) => c.id))
+  const seen = new Set<CategoryId>()
+  for (const id of orderedIds) {
+    if (!siblingIds.has(id) || seen.has(id)) {
+      throw new DomainError('category_reorder_mismatch', '排序列表必须恰好包含同级全部分类且不重复')
+    }
+    seen.add(id)
+  }
+  if (seen.size !== siblingIds.size) {
+    throw new DomainError('category_reorder_mismatch', '排序列表必须恰好包含同级全部分类且不重复')
+  }
+  const orderById = new Map(orderedIds.map((id, index) => [id, index]))
+  ledger.meta.categories = ledger.meta.categories.map((c) => {
+    const next = orderById.get(c.id)
+    return next === undefined ? c : { ...c, sortOrder: next }
+  })
   return ledger
 }
 

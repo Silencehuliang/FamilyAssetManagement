@@ -4,19 +4,18 @@ import MdiPlus from '~icons/mdi/plus'
 import { AnimatedNumber } from '../components/AnimatedNumber'
 import { useBillEditor } from '../components/editor'
 import type { Expense } from '../domain'
+import { categoryColor } from '../features/categories'
 import { canEditEntry, memberNameOf } from '../features/entries'
 import { formatCents, resolveCategoryName, todayKey } from '../features/entry'
 import {
   activeDotIndex,
   budgetWidget,
-  categoryAccent,
   homeBillGroups,
   homeDayLabel,
   homeDonut,
   homeSummary,
 } from '../features/home'
 import { type CategorySlice, chartColor } from '../features/stats'
-import { resolveExpenseTagNames } from '../features/tags'
 import type { AppController, AppState } from '../state/app-controller'
 
 const WIDGET_CLASS =
@@ -228,7 +227,7 @@ export function HomePage({
                       >
                         <span
                           className="size-9 shrink-0 rounded-md"
-                          style={{ background: categoryAccent(ledger, expense.categoryId) }}
+                          style={{ background: categoryColor(ledger, expense.categoryId) }}
                           aria-hidden="true"
                         />
                         <span className="min-w-0 flex-1">
@@ -236,9 +235,13 @@ export function HomePage({
                             <span className="truncate text-sm font-medium">
                               {resolveCategoryName(ledger, expense.categoryId)}
                             </span>
-                            {resolveExpenseTagNames(ledger, expense).map((tag) => (
-                              <span key={tag} className="entry-tag">
-                                #{tag}
+
+                            {expense.tagChips.map((chip) => (
+                              <span
+                                key={chip.id}
+                                className={`entry-tag ${chip.color ? `entry-tag-${chip.color}` : ''}`}
+                              >
+                                #{chip.name}
                               </span>
                             ))}
                           </span>

@@ -682,6 +682,54 @@ describe('AppController 分类管理(T8)', () => {
     )
   })
 
+  it('设置分类颜色与拖拽排序:写穿本地并同步到端点', async () => {
+    const { controller, store, endpoint } = await readyController()
+
+    const parent = await controller.addCategory({ name: '咖啡', color: 'purple' })
+    expect(parent.color).toBe('purple')
+    await controller.updateCategory(parent.id, { color: 'green' })
+    expect(controller.getLedger().meta.categories.find((c) => c.id === parent.id)?.color).toBe(
+      'green',
+    )
+
+    const parentIds = controller
+      .getLedger()
+      .meta.categories.filter((c) => c.parentId === undefined)
+      .sort((a, b) => a.sortOrder - b.sortOrder)
+      .map((c) => c.id)
+    const reversed = [...parentIds].reverse()
+    await controller.reorderCategories(null, reversed)
+    const afterOrder = controller
+      .getLedger()
+      .meta.categories.filter((c) => c.parentId === undefined)
+      .sort((a, b) => a.sortOrder - b.sortOrder || (a.id < b.id ? -1 : 1))
+      .map((c) => c.id)
+    expect(afterOrder).toEqual(reversed)
+
+    await controller.retrySync()
+    const files = await endpoint.listFiles()
+    expect(files['ledger/meta/categories.json']?.content).toContain('green')
+    const persisted = await store.loadLedger()
+    expect(persisted?.meta.categories.find((c) => c.id === parent.id)?.color).toBe('green')
+  })
+
+  it('排序列表与同级分类不一致时被拒,账本顺序不变', async () => {
+    const { controller } = await readyController()
+    const parentIds = controller
+      .getLedger()
+      .meta.categories.filter((c) => c.parentId === undefined)
+      .map((c) => c.id)
+
+    await expect(controller.reorderCategories(null, parentIds.slice(0, 2))).rejects.toMatchObject({
+      code: 'category_reorder_mismatch',
+    })
+    const order = controller
+      .getLedger()
+      .meta.categories.filter((c) => c.parentId === undefined)
+      .map((c) => c.id)
+    expect(order).toEqual(parentIds)
+  })
+
   it('删除有支出的子分类:未指定迁移目标被拒;指定同父子分类后支出迁移并登记墓碑', async () => {
     const { controller, store } = await readyController()
     await controller.recordExpense({

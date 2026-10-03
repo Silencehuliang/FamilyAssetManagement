@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import type { Expense, TagGroup, TagId } from '../../domain'
+import { categoryColor } from '../../features/categories'
 import {
   buildEditorExpenseInput,
   buildEditorExpensePatch,
@@ -192,6 +193,7 @@ export function BillEditorDialog({
           categories={categories}
           parentId={draft.parentId}
           categoryId={draft.categoryId}
+          colorOf={(id) => categoryColor(ledger, id)}
           onSelectParent={(parentId) =>
             setDraft((current) => ({
               ...current,
