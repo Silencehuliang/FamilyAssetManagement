@@ -1,5 +1,14 @@
+import type { ComponentType } from 'react'
 import { useState } from 'react'
+import MdiAccountGroupOutline from '~icons/mdi/account-group-outline'
+import MdiCalendarSyncOutline from '~icons/mdi/calendar-sync-outline'
+import MdiChevronRight from '~icons/mdi/chevron-right'
+import MdiCogOutline from '~icons/mdi/cog-outline'
+import MdiLogoutVariant from '~icons/mdi/logout-variant'
+import MdiShapeOutline from '~icons/mdi/shape-outline'
+import MdiThemeLightDark from '~icons/mdi/theme-light-dark'
 import { SYNC_LABELS } from '../components/SyncBadge'
+import { type ThemeChoice, useTheme } from '../components/theme'
 import type { AppController, AppState } from '../state/app-controller'
 
 interface Feedback {
@@ -10,6 +19,34 @@ interface Feedback {
 function errorText(err: unknown): string {
   if (err instanceof Error) return err.message
   return '操作失败,请重试'
+}
+
+const THEME_OPTIONS: { value: ThemeChoice; label: string }[] = [
+  { value: 'system', label: '跟随系统' },
+  { value: 'light', label: '浅色' },
+  { value: 'dark', label: '深色' },
+]
+
+function SettingRow({
+  icon: Icon,
+  label,
+  onClick,
+}: {
+  icon: ComponentType<{ className?: string }>
+  label: string
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex w-full items-center gap-3 border-t border-border bg-transparent py-3 text-left text-[15px] text-foreground first:border-t-0"
+    >
+      <Icon className="size-5 text-muted-foreground" />
+      <span className="flex-1">{label}</span>
+      <MdiChevronRight className="size-5 text-muted-foreground" />
+    </button>
+  )
 }
 
 /**
@@ -30,6 +67,7 @@ export function MePage({
   onOpenRecurring: () => void
 }) {
   const member = state.member
+  const { theme, setTheme } = useTheme()
   const [passwordOpen, setPasswordOpen] = useState(false)
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
@@ -89,18 +127,38 @@ export function MePage({
       ) : null}
 
       <section className="card">
-        <h2 className="card-title">账本设置</h2>
-        <button type="button" className="primary-button" onClick={onOpenRecurring}>
-          周期支出
-        </button>
-        <button type="button" className="primary-button" onClick={onOpenCategories}>
-          分类管理
-        </button>
-        {member?.role === 'admin' ? (
-          <button type="button" className="primary-button" onClick={onOpenMembers}>
-            成员管理
-          </button>
-        ) : null}
+        <h2 className="card-title flex items-center gap-1.5">
+          <MdiCogOutline className="size-4" />
+          账本设置
+        </h2>
+        <div className="flex flex-col">
+          <SettingRow icon={MdiCalendarSyncOutline} label="周期支出" onClick={onOpenRecurring} />
+          <SettingRow icon={MdiShapeOutline} label="分类管理" onClick={onOpenCategories} />
+          {member?.role === 'admin' ? (
+            <SettingRow icon={MdiAccountGroupOutline} label="成员管理" onClick={onOpenMembers} />
+          ) : null}
+        </div>
+      </section>
+
+      <section className="card">
+        <h2 className="card-title">外观</h2>
+        <div className="chip-row">
+          {THEME_OPTIONS.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              className={`chip ${theme === option.value ? 'chip-active' : ''}`}
+              aria-pressed={theme === option.value}
+              onClick={() => setTheme(option.value)}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+        <p className="member-meta flex items-center gap-1">
+          <MdiThemeLightDark className="size-4" />
+          深色模式跟随 .dark class,改动即时生效。
+        </p>
       </section>
 
       <section className="card">
@@ -133,7 +191,12 @@ export function MePage({
       </section>
 
       <section className="card">
-        <button type="button" className="danger-button" onClick={() => controller.logout()}>
+        <button
+          type="button"
+          className="danger-button inline-flex items-center justify-center gap-1.5"
+          onClick={() => controller.logout()}
+        >
+          <MdiLogoutVariant className="size-4" />
           退出登录
         </button>
       </section>

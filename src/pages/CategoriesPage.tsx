@@ -1,4 +1,8 @@
 import { useState } from 'react'
+import MdiArrowLeft from '~icons/mdi/arrow-left'
+import MdiDeleteOutline from '~icons/mdi/delete-outline'
+import MdiPencilOutline from '~icons/mdi/pencil-outline'
+import MdiPlus from '~icons/mdi/plus'
 import type { Category } from '../domain'
 import { DomainError } from '../domain/types'
 import {
@@ -129,8 +133,13 @@ export function CategoriesPage({
 
   return (
     <div className="page">
-      <button type="button" className="link-button back-button" onClick={onBack}>
-        ← 返回
+      <button
+        type="button"
+        className="link-button back-button inline-flex items-center gap-1"
+        onClick={onBack}
+      >
+        <MdiArrowLeft className="size-4" />
+        返回
       </button>
 
       <section className="card">
@@ -180,7 +189,7 @@ export function CategoriesPage({
               <div className="row-actions">
                 <button
                   type="button"
-                  className="text-button"
+                  className="text-button inline-flex items-center gap-0.5"
                   onClick={() =>
                     openDialog({
                       mode: 'add-child',
@@ -189,22 +198,25 @@ export function CategoriesPage({
                     })
                   }
                 >
+                  <MdiPlus className="size-4" />
                   加子类
                 </button>
                 <button
                   type="button"
-                  className="text-button"
+                  className="text-button inline-flex items-center gap-0.5"
                   onClick={() =>
                     openDialog({ mode: 'rename', category: node.parent }, node.parent.name)
                   }
                 >
+                  <MdiPencilOutline className="size-4" />
                   改名
                 </button>
                 <button
                   type="button"
-                  className="text-button danger-text"
+                  className="text-button danger-text inline-flex items-center gap-0.5"
                   onClick={() => requestDelete(node.parent)}
                 >
+                  <MdiDeleteOutline className="size-4" />
                   删除
                 </button>
               </div>
@@ -221,16 +233,18 @@ export function CategoriesPage({
                     <span className="row-actions">
                       <button
                         type="button"
-                        className="text-button"
+                        className="text-button inline-flex items-center gap-0.5"
                         onClick={() => openDialog({ mode: 'rename', category: child }, child.name)}
                       >
+                        <MdiPencilOutline className="size-4" />
                         改名
                       </button>
                       <button
                         type="button"
-                        className="text-button danger-text"
+                        className="text-button danger-text inline-flex items-center gap-0.5"
                         onClick={() => requestDelete(child)}
                       >
+                        <MdiDeleteOutline className="size-4" />
                         删除
                       </button>
                     </span>
@@ -245,10 +259,11 @@ export function CategoriesPage({
       {canManage ? (
         <button
           type="button"
-          className="primary-button"
+          className="primary-button inline-flex items-center justify-center gap-1"
           onClick={() => openDialog({ mode: 'add-parent' })}
         >
-          + 添加父分类
+          <MdiPlus className="size-4" />
+          添加父分类
         </button>
       ) : null}
 

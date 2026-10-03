@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import MdiChevronLeft from '~icons/mdi/chevron-left'
+import MdiChevronRight from '~icons/mdi/chevron-right'
 import { aggregateMonth, budgetHistory, budgetOutcome, budgetProgress } from '../domain'
 import { formatAmountInput, formatMonthLabel, shiftMonth } from '../features/entries'
 import {
@@ -150,7 +152,7 @@ export function BudgetPage({ controller, state }: { controller: AppController; s
             aria-label="上一月"
             onClick={() => changeMonth(shiftMonth(month, -1))}
           >
-            ‹
+            <MdiChevronLeft className="size-5" />
           </button>
           <strong className="month-title">{formatMonthLabel(month)}</strong>
           <button
@@ -159,7 +161,7 @@ export function BudgetPage({ controller, state }: { controller: AppController; s
             aria-label="下一月"
             onClick={() => changeMonth(shiftMonth(month, 1))}
           >
-            ›
+            <MdiChevronRight className="size-5" />
           </button>
         </div>
         <div className="month-total">

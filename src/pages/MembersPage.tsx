@@ -1,4 +1,8 @@
 import { useState } from 'react'
+import MdiAccountCheckOutline from '~icons/mdi/account-check-outline'
+import MdiAccountOffOutline from '~icons/mdi/account-off-outline'
+import MdiArrowLeft from '~icons/mdi/arrow-left'
+import MdiLockReset from '~icons/mdi/lock-reset'
 import type { Member } from '../domain'
 import { DomainError } from '../domain/types'
 import type { AppController, AppState } from '../state/app-controller'
@@ -89,8 +93,13 @@ export function MembersPage({
   if (!isAdmin) {
     return (
       <div className="page">
-        <button type="button" className="link-button back-button" onClick={onBack}>
-          ← 返回
+        <button
+          type="button"
+          className="link-button back-button inline-flex items-center gap-1"
+          onClick={onBack}
+        >
+          <MdiArrowLeft className="size-4" />
+          返回
         </button>
         <section className="placeholder-card">
           <p className="placeholder-title">仅管理员可管理成员</p>
@@ -105,8 +114,13 @@ export function MembersPage({
 
   return (
     <div className="page">
-      <button type="button" className="link-button back-button" onClick={onBack}>
-        ← 返回
+      <button
+        type="button"
+        className="link-button back-button inline-flex items-center gap-1"
+        onClick={onBack}
+      >
+        <MdiArrowLeft className="size-4" />
+        返回
       </button>
 
       <section className="card">
@@ -136,15 +150,20 @@ export function MembersPage({
             <div className="row-actions">
               <button
                 type="button"
-                className="text-button"
+                className="text-button inline-flex items-center gap-0.5"
                 disabled={busy || (member.id === state.member?.id && !member.disabled)}
                 onClick={() => toggleStatus(member)}
               >
+                {member.disabled ? (
+                  <MdiAccountCheckOutline className="size-4" />
+                ) : (
+                  <MdiAccountOffOutline className="size-4" />
+                )}
                 {member.disabled ? '启用' : '停用'}
               </button>
               <button
                 type="button"
-                className="text-button"
+                className="text-button inline-flex items-center gap-0.5"
                 disabled={busy}
                 onClick={() => {
                   setResetTarget(member)
@@ -152,6 +171,7 @@ export function MembersPage({
                   setFeedback(null)
                 }}
               >
+                <MdiLockReset className="size-4" />
                 重置密码
               </button>
             </div>

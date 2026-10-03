@@ -1,6 +1,10 @@
-import { type ReactNode, useEffect, useState } from 'react'
+import { type ComponentType, useEffect, useState } from 'react'
+import MdiAccountOutline from '~icons/mdi/account-outline'
+import MdiChartDonut from '~icons/mdi/chart-donut'
+import MdiFormatListBulleted from '~icons/mdi/format-list-bulleted'
+import MdiPlusCircleOutline from '~icons/mdi/plus-circle-outline'
+import MdiWalletOutline from '~icons/mdi/wallet-outline'
 import { SyncBadge } from './components/SyncBadge'
-import { TabIcon } from './components/TabIcon'
 import { AddExpensePage } from './pages/AddExpensePage'
 import { BudgetPage } from './pages/BudgetPage'
 import { CategoriesPage } from './pages/CategoriesPage'
@@ -20,58 +24,15 @@ type TabKey = 'add' | 'entries' | 'stats' | 'budget' | 'me'
 interface Tab {
   key: TabKey
   label: string
-  icon: ReactNode
+  icon: ComponentType<{ className?: string }>
 }
 
 const TABS: Tab[] = [
-  {
-    key: 'add',
-    label: '记一笔',
-    icon: (
-      <TabIcon>
-        <circle cx="12" cy="12" r="9" />
-        <path d="M12 8v8M8 12h8" />
-      </TabIcon>
-    ),
-  },
-  {
-    key: 'entries',
-    label: '明细',
-    icon: (
-      <TabIcon>
-        <path d="M4 6h16M4 12h16M4 18h10" />
-      </TabIcon>
-    ),
-  },
-  {
-    key: 'stats',
-    label: '统计',
-    icon: (
-      <TabIcon>
-        <path d="M5 20V10M12 20V4M19 20v-7" />
-      </TabIcon>
-    ),
-  },
-  {
-    key: 'budget',
-    label: '预算',
-    icon: (
-      <TabIcon>
-        <circle cx="12" cy="12" r="9" />
-        <path d="M12 12V6.5A5.5 5.5 0 0 1 17.5 12H12Z" />
-      </TabIcon>
-    ),
-  },
-  {
-    key: 'me',
-    label: '我的',
-    icon: (
-      <TabIcon>
-        <circle cx="12" cy="8.5" r="3.5" />
-        <path d="M5 19c1.5-3.5 4-5 7-5s5.5 1.5 7 5" />
-      </TabIcon>
-    ),
-  },
+  { key: 'add', label: '记一笔', icon: MdiPlusCircleOutline },
+  { key: 'entries', label: '明细', icon: MdiFormatListBulleted },
+  { key: 'stats', label: '统计', icon: MdiChartDonut },
+  { key: 'budget', label: '预算', icon: MdiWalletOutline },
+  { key: 'me', label: '我的', icon: MdiAccountOutline },
 ]
 
 export default function App() {
@@ -144,18 +105,23 @@ function Shell({ state }: { state: AppState }) {
           </>
         ) : null}
       </main>
-      <nav className="tab-bar">
-        {TABS.map((t) => (
-          <button
-            key={t.key}
-            type="button"
-            className={`tab ${tab === t.key && view === null ? 'tab-active' : ''}`}
-            onClick={() => openTab(t.key)}
-          >
-            {t.icon}
-            <span>{t.label}</span>
-          </button>
-        ))}
+      <nav className="grid grid-cols-5 border-t border-border bg-card pb-[var(--safe-area-inset-bottom)]">
+        {TABS.map((t) => {
+          const active = tab === t.key && view === null
+          return (
+            <button
+              key={t.key}
+              type="button"
+              className={`flex cursor-pointer flex-col items-center gap-0.5 border-0 bg-transparent px-0 pt-2 pb-2.5 text-[11px] ${
+                active ? 'text-foreground' : 'text-muted-foreground'
+              }`}
+              onClick={() => openTab(t.key)}
+            >
+              <t.icon className="size-6" />
+              <span>{t.label}</span>
+            </button>
+          )
+        })}
       </nav>
     </div>
   )

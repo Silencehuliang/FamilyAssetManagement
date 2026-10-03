@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import MdiChevronLeft from '~icons/mdi/chevron-left'
+import MdiChevronRight from '~icons/mdi/chevron-right'
 import {
   ExpenseForm,
   type ExpenseFormFeedback,
@@ -122,7 +124,7 @@ export function EntriesPage({ controller, state }: { controller: AppController; 
             aria-label="上一月"
             onClick={() => changeMonth(shiftMonth(month, -1))}
           >
-            ‹
+            <MdiChevronLeft className="size-5" />
           </button>
           <div className="chip-row month-row">
             {options.map((option) => (
@@ -145,7 +147,7 @@ export function EntriesPage({ controller, state }: { controller: AppController; 
             aria-label="下一月"
             onClick={() => changeMonth(shiftMonth(month, 1))}
           >
-            ›
+            <MdiChevronRight className="size-5" />
           </button>
         </div>
         <div className="month-total">

@@ -1,4 +1,10 @@
 import { useState } from 'react'
+import MdiArrowLeft from '~icons/mdi/arrow-left'
+import MdiDeleteOutline from '~icons/mdi/delete-outline'
+import MdiPauseCircleOutline from '~icons/mdi/pause-circle-outline'
+import MdiPencilOutline from '~icons/mdi/pencil-outline'
+import MdiPlayCircleOutline from '~icons/mdi/play-circle-outline'
+import MdiPlus from '~icons/mdi/plus'
 import {
   canEditRecurring,
   FREQUENCIES,
@@ -173,8 +179,13 @@ export function RecurringPage({
 
   return (
     <div className="page">
-      <button type="button" className="link-button back-button" onClick={onBack}>
-        ← 返回
+      <button
+        type="button"
+        className="link-button back-button inline-flex items-center gap-1"
+        onClick={onBack}
+      >
+        <MdiArrowLeft className="size-4" />
+        返回
       </button>
 
       <section className="card">
@@ -217,26 +228,33 @@ export function RecurringPage({
                 <div className="row-actions recurring-actions">
                   <button
                     type="button"
-                    className="text-button"
+                    className="text-button inline-flex items-center gap-0.5"
                     disabled={!editable || busy}
                     onClick={() => toggle(rule)}
                   >
+                    {rule.enabled ? (
+                      <MdiPauseCircleOutline className="size-4" />
+                    ) : (
+                      <MdiPlayCircleOutline className="size-4" />
+                    )}
                     {rule.enabled ? '停用' : '启用'}
                   </button>
                   <button
                     type="button"
-                    className="text-button"
+                    className="text-button inline-flex items-center gap-0.5"
                     disabled={!editable || busy}
                     onClick={() => openEdit(rule)}
                   >
+                    <MdiPencilOutline className="size-4" />
                     编辑
                   </button>
                   <button
                     type="button"
-                    className="text-button danger-text"
+                    className="text-button danger-text inline-flex items-center gap-0.5"
                     disabled={!editable || busy}
                     onClick={() => remove(rule)}
                   >
+                    <MdiDeleteOutline className="size-4" />
                     删除
                   </button>
                 </div>
@@ -246,8 +264,14 @@ export function RecurringPage({
         })
       )}
 
-      <button type="button" className="primary-button" disabled={busy} onClick={openCreate}>
-        + 新建周期支出
+      <button
+        type="button"
+        className="primary-button inline-flex items-center justify-center gap-1"
+        disabled={busy}
+        onClick={openCreate}
+      >
+        <MdiPlus className="size-4" />
+        新建周期支出
       </button>
 
       {editing ? (
