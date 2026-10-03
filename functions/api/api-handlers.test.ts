@@ -629,6 +629,29 @@ describe('PUT /api/ledger/file', () => {
     expect(await jsonOf(response)).toMatchObject({ sha: 'new-sha-1' })
     expect(stub.files.get(MONTH_FILE)).toBe('{"expenses":[]}')
   })
+
+  it('普通成员可写 tags.json;写 tagGroups.json 返回 403', async () => {
+    const member = await seededMember('xiaohong', 'pw-123456')
+    stub = githubStub({ [MEMBERS_FILE]: serializeMembers([member]) })
+    vi.stubGlobal('fetch', stub.impl)
+    const token = await createSession(member, ENV.JWT_SECRET)
+
+    const allowed = await ledgerPut({
+      request: ledgerPutRequest({ path: 'ledger/meta/tags.json', content: '{"tags":[]}' }, token),
+      env: ENV,
+    })
+    expect(allowed.status).toBe(200)
+
+    const denied = await ledgerPut({
+      request: ledgerPutRequest(
+        { path: 'ledger/meta/tagGroups.json', content: '{"groups":[]}' },
+        token,
+      ),
+      env: ENV,
+    })
+    expect(denied.status).toBe(403)
+    expect(await jsonOf(denied)).toMatchObject({ error: 'forbidden' })
+  })
 })
 
 describe('GET /api/members', () => {

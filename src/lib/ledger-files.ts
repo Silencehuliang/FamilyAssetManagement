@@ -3,18 +3,26 @@
  * - 路径必须位于 ledger/ 之下,越界一律 400;
  * - 读取对所有已认证成员开放,但 members.json 除外 —— 凭据永不过代理,
  *   客户端经 GET /api/members 获取去凭据的成员列表;
- * - 写入仅限:支出月度文件与周期规则(所有成员)、分类/预算/成员元数据(仅管理员);
+ * - 写入仅限:支出月度文件、周期规则与标签实体(所有成员)、分类/预算/标签组元数据(仅管理员);
  * - members.json 双向皆由鉴权端点专属管理,代理一律 403;
  * - 删除仅限支出月份文件(最后一条支出被删、月份文件应消失),需携带当前 sha;
- * - 列表接口返回客户端同步范围的全部文件(月份 + 三个 meta;members.json 永不包含)。
+ * - 列表接口返回客户端同步范围的全部文件(月份 + 五个 meta;members.json 永不包含)。
  */
-import { BUDGETS_FILE, CATEGORIES_FILE, parseMonthFilePath, RECURRING_FILE } from '../sync/files'
+import {
+  BUDGETS_FILE,
+  CATEGORIES_FILE,
+  parseMonthFilePath,
+  RECURRING_FILE,
+  TAG_GROUPS_FILE,
+  TAGS_FILE,
+} from '../sync/files'
 import type { JwtPayload } from './auth/jwt'
 import { MEMBERS_FILE } from './auth/members'
 import type { LedgerStore } from './github'
 import { HttpError } from './http'
 
-const ADMIN_ONLY_FILES = new Set([CATEGORIES_FILE, BUDGETS_FILE])
+/** 管理员专属元数据:分类/预算/标签组(标签实体全员可写,ADR-0006) */
+const ADMIN_ONLY_FILES = new Set([CATEGORIES_FILE, BUDGETS_FILE, TAG_GROUPS_FILE])
 
 /** 同步范围内的单文件快照(客户端 remote 适配器映射为 RemoteFile) */
 export interface LedgerFileSnapshot {
@@ -26,7 +34,7 @@ const MONTHS_DIR = 'ledger/months'
 
 /**
  * 列出同步范围的账本文件:先列出 months/ 目录再逐个取内容,
- * 加上三个 meta 文件;不存在或不是月文件命名的条目直接省略。
+ * 加上五个 meta 文件;不存在或不是月文件命名的条目直接省略。
  * members.json 永不进入结果(客户端同步文件集不含成员凭据文件)。
  */
 export async function listLedgerFiles(
@@ -39,7 +47,7 @@ export async function listLedgerFiles(
     const file = await store.getFile(entry.path)
     if (file) files[entry.path] = { content: file.content, revision: file.sha }
   }
-  for (const path of [CATEGORIES_FILE, BUDGETS_FILE, RECURRING_FILE]) {
+  for (const path of [CATEGORIES_FILE, TAGS_FILE, TAG_GROUPS_FILE, BUDGETS_FILE, RECURRING_FILE]) {
     const file = await store.getFile(path)
     if (file) files[path] = { content: file.content, revision: file.sha }
   }

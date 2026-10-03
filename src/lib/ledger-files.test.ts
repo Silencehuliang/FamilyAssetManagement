@@ -151,7 +151,7 @@ describe('writeLedgerFile(代理写入)', () => {
 })
 
 describe('元数据写入的角色矩阵', () => {
-  it('分类/预算元数据仅管理员可写,月度支出文件所有成员可写', async () => {
+  it('分类/预算/标签组仅管理员可写;标签实体与月度支出文件所有成员可写', async () => {
     const store = new MemoryStore()
     await expect(
       writeLedgerFile(store, session('member'), {
@@ -167,6 +167,18 @@ describe('元数据写入的角色矩阵', () => {
     ).rejects.toMatchObject({ status: 403 })
     await expect(
       writeLedgerFile(store, session('member'), {
+        path: 'ledger/meta/tagGroups.json',
+        content: '{"groups":[]}',
+      }),
+    ).rejects.toMatchObject({ status: 403, code: 'forbidden' })
+    await expect(
+      writeLedgerFile(store, session('member'), {
+        path: 'ledger/meta/tags.json',
+        content: '{"tags":[]}',
+      }),
+    ).resolves.toMatchObject({ sha: expect.any(String) })
+    await expect(
+      writeLedgerFile(store, session('member'), {
         path: 'ledger/months/2026-10.json',
         content: '{"expenses":[]}',
       }),
@@ -175,11 +187,13 @@ describe('元数据写入的角色矩阵', () => {
 })
 
 describe('listLedgerFiles(同步清单)', () => {
-  it('列出月份文件与三个 meta 文件,members.json 永不包含', async () => {
+  it('列出月份文件与五个 meta 文件,members.json 永不包含', async () => {
     const store = new MemoryStore({
       'ledger/months/2026-10.json': '{"expenses":[]}',
       'ledger/months/2026-09.json': '{"expenses":[{"id":"e-1"}]}',
       'ledger/meta/categories.json': '{"categories":[]}',
+      'ledger/meta/tags.json': '{"tags":[]}',
+      'ledger/meta/tagGroups.json': '{"groups":[]}',
       'ledger/meta/budgets.json': '{"budgets":{}}',
       'ledger/meta/recurring.json': '{"recurring":[]}',
       'ledger/meta/members.json': '{"members":[]}',
@@ -192,6 +206,8 @@ describe('listLedgerFiles(同步清单)', () => {
       'ledger/meta/budgets.json',
       'ledger/meta/categories.json',
       'ledger/meta/recurring.json',
+      'ledger/meta/tagGroups.json',
+      'ledger/meta/tags.json',
       'ledger/months/2026-09.json',
       'ledger/months/2026-10.json',
     ])
