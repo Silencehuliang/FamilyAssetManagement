@@ -7,6 +7,23 @@ import { shiftMonth } from './entries'
 
 export type RangePreset = 'thisMonth' | 'last3Months' | 'last12Months'
 
+/** 图表色板(统计页与首页迷你图共用):CSS chart 令牌,深浅色模式各自适配 */
+export const CHART_COLORS = [
+  'var(--chart-1)',
+  'var(--chart-2)',
+  'var(--chart-3)',
+  'var(--chart-4)',
+  'var(--chart-5)',
+  'var(--chart-6)',
+  'var(--chart-7)',
+  'var(--chart-8)',
+] as const
+
+/** 按下标循环取色(序号与分类排序解耦);数组恒非空,越界仅作类型兜底 */
+export function chartColor(index: number): string {
+  return CHART_COLORS[index % CHART_COLORS.length] ?? 'var(--tag-gray)'
+}
+
 export const RANGE_LABELS: Record<RangePreset, string> = {
   thisMonth: '本月',
   last3Months: '近三月',

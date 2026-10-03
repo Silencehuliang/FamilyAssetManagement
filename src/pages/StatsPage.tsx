@@ -4,6 +4,7 @@ import {
   type CategoryLevel,
   type CategorySlice,
   categoryShare,
+  chartColor,
   type MemberSlice,
   type MonthPoint,
   memberShare,
@@ -16,22 +17,6 @@ import {
 import type { AppState } from '../state/app-controller'
 
 const RANGE_ORDER: RangePreset[] = ['thisMonth', 'last3Months', 'last12Months']
-
-/** 图表色板走 CSS 变量,深浅色模式各自适配 */
-const CHART_COLORS = [
-  'var(--chart-1)',
-  'var(--chart-2)',
-  'var(--chart-3)',
-  'var(--chart-4)',
-  'var(--chart-5)',
-  'var(--chart-6)',
-  'var(--chart-7)',
-  'var(--chart-8)',
-]
-
-function sliceColor(index: number): string {
-  return CHART_COLORS[index % CHART_COLORS.length] ?? 'var(--text-dim)'
-}
 
 /**
  * 月趋势柱状图(T10,手写 SVG,无图表库)。柱高按范围内最大值归一;
@@ -122,7 +107,7 @@ function DonutChart({ slices, totalCents }: { slices: CategorySlice[]; totalCent
             cy={center}
             r={radius}
             fill="none"
-            stroke={sliceColor(index)}
+            stroke={chartColor(index)}
             strokeWidth={strokeWidth}
             strokeDasharray={`${length} ${circumference - length}`}
             strokeDashoffset={dashOffset}
@@ -241,7 +226,7 @@ export function StatsPage({ state }: { state: AppState }) {
                 <li key={slice.id} className="legend-item">
                   <span
                     className="legend-dot"
-                    style={{ background: sliceColor(index) }}
+                    style={{ background: chartColor(index) }}
                     aria-hidden="true"
                   />
                   <span className="legend-name">{slice.name}</span>

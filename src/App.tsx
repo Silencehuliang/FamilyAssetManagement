@@ -1,10 +1,14 @@
-import { type ReactNode, useEffect, useState } from 'react'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
+import { Toaster, toast } from 'sonner'
+import { AppNav, type AppRoute } from './components/AppNav'
+import { PopupLayout, useDialog } from './components/dialog'
 import { SyncBadge } from './components/SyncBadge'
-import { TabIcon } from './components/TabIcon'
+import { useTheme } from './components/theme'
 import { AddExpensePage } from './pages/AddExpensePage'
 import { BudgetPage } from './pages/BudgetPage'
 import { CategoriesPage } from './pages/CategoriesPage'
 import { EntriesPage } from './pages/EntriesPage'
+import { HomePage } from './pages/HomePage'
 import { LoginPage } from './pages/LoginPage'
 import { MembersPage } from './pages/MembersPage'
 import { MePage } from './pages/MePage'
@@ -15,99 +19,81 @@ import type { AppState } from './state/app-controller'
 import { appController } from './state/runtime'
 import { useAppState } from './state/use-app'
 
-type TabKey = 'add' | 'entries' | 'stats' | 'budget' | 'me'
-
-interface Tab {
-  key: TabKey
-  label: string
-  icon: ReactNode
-}
-
-const TABS: Tab[] = [
-  {
-    key: 'add',
-    label: '记一笔',
-    icon: (
-      <TabIcon>
-        <circle cx="12" cy="12" r="9" />
-        <path d="M12 8v8M8 12h8" />
-      </TabIcon>
-    ),
-  },
-  {
-    key: 'entries',
-    label: '明细',
-    icon: (
-      <TabIcon>
-        <path d="M4 6h16M4 12h16M4 18h10" />
-      </TabIcon>
-    ),
-  },
-  {
-    key: 'stats',
-    label: '统计',
-    icon: (
-      <TabIcon>
-        <path d="M5 20V10M12 20V4M19 20v-7" />
-      </TabIcon>
-    ),
-  },
-  {
-    key: 'budget',
-    label: '预算',
-    icon: (
-      <TabIcon>
-        <circle cx="12" cy="12" r="9" />
-        <path d="M12 12V6.5A5.5 5.5 0 0 1 17.5 12H12Z" />
-      </TabIcon>
-    ),
-  },
-  {
-    key: 'me',
-    label: '我的',
-    icon: (
-      <TabIcon>
-        <circle cx="12" cy="8.5" r="3.5" />
-        <path d="M5 19c1.5-3.5 4-5 7-5s5.5 1.5 7 5" />
-      </TabIcon>
-    ),
-  },
-]
-
 export default function App() {
   const state = useAppState(appController)
+  const { resolved } = useTheme()
+  const previousSync = useRef(state.syncStatus)
 
   useEffect(() => {
     void appController.boot()
     return appController.startConnectivityListeners()
   }, [])
 
+  // 同步失败第一次出现时给一次 toast(重复失败不刷屏)
+  useEffect(() => {
+    if (state.syncStatus === 'error' && previousSync.current !== 'error') {
+      toast.error(
+        state.syncError ? `同步失败:${state.syncError}` : '同步失败,本地记录不受影响,可稍后重试',
+      )
+    }
+    previousSync.current = state.syncStatus
+  }, [state.syncStatus, state.syncError])
+
+  let content: ReactNode
   if (state.phase === 'booting') {
-    return (
+    content = (
       <div className="app app-centered">
         <p className="placeholder">正在打开账本…</p>
       </div>
     )
+  } else if (state.phase === 'setup') {
+    content = <SetupPage controller={appController} state={state} />
+  } else if (state.phase === 'login') {
+    content = <LoginPage controller={appController} state={state} />
+  } else {
+    content = <Shell state={state} />
   }
 
-  if (state.phase === 'setup') {
-    return <SetupPage controller={appController} state={state} />
-  }
-
-  if (state.phase === 'login') {
-    return <LoginPage controller={appController} state={state} />
-  }
-
-  return <Shell state={state} />
+  return (
+    <>
+      {content}
+      <Toaster position="top-center" theme={resolved} richColors closeButton />
+    </>
+  )
 }
 
 function Shell({ state }: { state: AppState }) {
-  const [tab, setTab] = useState<TabKey>('add')
+  const [route, setRoute] = useState<AppRoute>('home')
   const [view, setView] = useState<'categories' | 'members' | 'recurring' | null>(null)
+  const { showDialog } = useDialog()
 
-  const openTab = (key: TabKey): void => {
-    setTab(key)
+  const navigate = (next: AppRoute): void => {
+    setRoute(next)
     setView(null)
+  }
+
+  /** FAB:记账编辑器(V7)接入前先给占位对话框,可跳转到现有表单 */
+  const openEditor = (): void => {
+    void showDialog<void>(
+      ({ close }) => (
+        <PopupLayout title="记一笔">
+          <p className="member-meta">
+            全屏记账编辑器(计算器键盘 / 再记)将在 v1.1 第二批接入;现在可以先用完整记账表单。
+          </p>
+          <button
+            type="button"
+            className="primary-button mt-4"
+            onClick={() => {
+              close(undefined)
+              navigate('add')
+            }}
+          >
+            打开记账表单
+          </button>
+        </PopupLayout>
+      ),
+      { label: '记一笔' },
+    )
   }
 
   return (
@@ -116,47 +102,49 @@ function Shell({ state }: { state: AppState }) {
         <h1>家庭记账</h1>
         <SyncBadge status={state.syncStatus} />
       </header>
-      <main className="app-main">
-        {view === 'categories' ? (
-          <CategoriesPage controller={appController} state={state} onBack={() => setView(null)} />
-        ) : null}
-        {view === 'members' ? (
-          <MembersPage controller={appController} state={state} onBack={() => setView(null)} />
-        ) : null}
-        {view === 'recurring' ? (
-          <RecurringPage controller={appController} state={state} onBack={() => setView(null)} />
-        ) : null}
-        {view === null ? (
-          <>
-            {tab === 'add' ? <AddExpensePage controller={appController} state={state} /> : null}
-            {tab === 'entries' ? <EntriesPage controller={appController} state={state} /> : null}
-            {tab === 'stats' ? <StatsPage state={state} /> : null}
-            {tab === 'budget' ? <BudgetPage controller={appController} state={state} /> : null}
-            {tab === 'me' ? (
-              <MePage
-                controller={appController}
-                state={state}
-                onOpenCategories={() => setView('categories')}
-                onOpenMembers={() => setView('members')}
-                onOpenRecurring={() => setView('recurring')}
-              />
-            ) : null}
-          </>
-        ) : null}
+      {/* 竖轨补偿(≥768px 的 84px 左内边距)统一在 app.css 的 rail 媒体查询里给页头与正文加 */}
+      <main className="app-main pb-[calc(5.5rem+var(--safe-area-inset-bottom))] md:pb-8">
+        <div key={view ?? route} className="page-show">
+          {view === 'categories' ? (
+            <CategoriesPage controller={appController} state={state} onBack={() => setView(null)} />
+          ) : null}
+          {view === 'members' ? (
+            <MembersPage controller={appController} state={state} onBack={() => setView(null)} />
+          ) : null}
+          {view === 'recurring' ? (
+            <RecurringPage controller={appController} state={state} onBack={() => setView(null)} />
+          ) : null}
+          {view === null ? (
+            <>
+              {route === 'home' ? (
+                <HomePage
+                  controller={appController}
+                  state={state}
+                  onOpenAdd={() => navigate('add')}
+                  onOpenStats={() => navigate('stats')}
+                  onOpenBudget={() => navigate('budget')}
+                />
+              ) : null}
+              {route === 'entries' ? (
+                <EntriesPage controller={appController} state={state} />
+              ) : null}
+              {route === 'stats' ? <StatsPage state={state} /> : null}
+              {route === 'budget' ? <BudgetPage controller={appController} state={state} /> : null}
+              {route === 'me' ? (
+                <MePage
+                  controller={appController}
+                  state={state}
+                  onOpenCategories={() => setView('categories')}
+                  onOpenMembers={() => setView('members')}
+                  onOpenRecurring={() => setView('recurring')}
+                />
+              ) : null}
+              {route === 'add' ? <AddExpensePage controller={appController} state={state} /> : null}
+            </>
+          ) : null}
+        </div>
       </main>
-      <nav className="tab-bar">
-        {TABS.map((t) => (
-          <button
-            key={t.key}
-            type="button"
-            className={`tab ${tab === t.key && view === null ? 'tab-active' : ''}`}
-            onClick={() => openTab(t.key)}
-          >
-            {t.icon}
-            <span>{t.label}</span>
-          </button>
-        ))}
-      </nav>
+      <AppNav route={route} onNavigate={navigate} onCreate={openEditor} />
     </div>
   )
 }

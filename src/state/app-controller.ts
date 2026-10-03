@@ -57,6 +57,7 @@ import {
   ensureCategories,
   todayKey,
 } from '../features/entry'
+import { errorText } from '../lib/errors'
 import type { LocalStore } from '../storage'
 import { MemoryLocalStore, PersistentQueue } from '../storage'
 import type { PendingOp, SyncEndpoint } from '../sync'
@@ -100,12 +101,6 @@ export interface AppControllerDeps {
   newId?: () => string
   /** 本地「今天」(YYYY-MM-DD);测试注入,缺省取本机日期 */
   today?: () => string
-}
-
-function errorText(err: unknown): string {
-  if (err instanceof ApiError) return err.message
-  if (err instanceof Error) return err.message
-  return '操作失败,请重试'
 }
 
 export class AppController {

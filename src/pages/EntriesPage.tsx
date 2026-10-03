@@ -1,17 +1,15 @@
 import { useState } from 'react'
-import {
-  ExpenseForm,
-  type ExpenseFormFeedback,
-  type ExpenseFormValues,
-} from '../components/ExpenseForm'
+import MdiChevronLeft from '~icons/mdi/chevron-left'
+import MdiChevronRight from '~icons/mdi/chevron-right'
+import { useDialog } from '../components/dialog'
+import { EditExpenseDialog } from '../components/EditExpenseDialog'
 import type { Expense } from '../domain'
-import { DomainError } from '../domain/types'
 import {
   canEditEntry,
   EMPTY_FILTERS,
   type EntryFilters,
-  expenseToForm,
   filterExpenses,
+  formatDayLabel,
   groupByDay,
   hasActiveFilters,
   memberNameOf,
@@ -23,19 +21,6 @@ import {
 import { formatCents, groupCategories, resolveCategoryPath, todayKey } from '../features/entry'
 import type { AppController, AppState } from '../state/app-controller'
 
-const WEEKDAYS = '日一二三四五六'
-
-function dayLabel(date: string): string {
-  const [, month = '', day = ''] = date.split('-')
-  const weekday = new Date(`${date}T00:00:00`).getDay()
-  return `${Number(month)}月${Number(day)}日 周${WEEKDAYS[weekday] ?? ''}`
-}
-
-function errorText(err: unknown): string {
-  if (err instanceof DomainError || err instanceof Error) return err.message
-  return '操作失败,请重试'
-}
-
 /**
  * 明细页(T7):按月浏览,按日倒序分组展示日小计与月合计;
  * 分类/成员/标签/关键词四种筛选可组合、一键清空;
@@ -45,13 +30,10 @@ export function EntriesPage({ controller, state }: { controller: AppController; 
   const ledger = state.ledger
   const actor = state.member
   const currentMonth = todayKey().slice(0, 7)
+  const { showDialog } = useDialog()
 
   const [month, setMonth] = useState(currentMonth)
   const [filters, setFilters] = useState<EntryFilters>(EMPTY_FILTERS)
-  const [editing, setEditing] = useState<{ id: string; values: ExpenseFormValues } | null>(null)
-  const [feedback, setFeedback] = useState<ExpenseFormFeedback | null>(null)
-  const [sheetFeedback, setSheetFeedback] = useState<ExpenseFormFeedback | null>(null)
-  const [busy, setBusy] = useState(false)
 
   const monthExpenses = ledger.months[month]?.expenses ?? []
   const visible = filterExpenses(ledger, monthExpenses, filters)
@@ -65,51 +47,23 @@ export function EntriesPage({ controller, state }: { controller: AppController; 
 
   const openEdit = (expense: Expense): void => {
     if (!actor || !canEditEntry(actor, expense)) return
-    setSheetFeedback(null)
-    setEditing({ id: expense.id, values: expenseToForm(ledger, expense) })
+    void showDialog<void>(
+      ({ close }) => (
+        <EditExpenseDialog
+          controller={controller}
+          state={state}
+          expense={expense}
+          onClose={() => close(undefined)}
+        />
+      ),
+      { label: '编辑支出' },
+    )
   }
 
   /** 切月:标签选项按月生成,切月时清掉已选标签避免悬空 */
   const changeMonth = (next: string): void => {
     setMonth(next)
     setFilters((current) => (current.tag === '' ? current : { ...current, tag: '' }))
-  }
-
-  const saveEdit = (resolved: { categoryId: string; memberId: string }): void => {
-    if (!editing) return
-    setBusy(true)
-    setSheetFeedback(null)
-    void controller
-      .updateExpense(editing.id, { ...editing.values, ...resolved })
-      .then(() => {
-        setEditing(null)
-        setFeedback({ kind: 'ok', text: '已保存修改' })
-      })
-      .catch((err: unknown) => {
-        setSheetFeedback({ kind: 'error', text: errorText(err) })
-      })
-      .finally(() => {
-        setBusy(false)
-      })
-  }
-
-  const deleteEditing = (): void => {
-    if (!editing) return
-    if (!window.confirm('删除这笔支出?删除会同步到所有设备。')) return
-    setBusy(true)
-    setSheetFeedback(null)
-    void controller
-      .deleteExpense(editing.id)
-      .then(() => {
-        setEditing(null)
-        setFeedback({ kind: 'ok', text: '已删除' })
-      })
-      .catch((err: unknown) => {
-        setSheetFeedback({ kind: 'error', text: errorText(err) })
-      })
-      .finally(() => {
-        setBusy(false)
-      })
   }
 
   return (
@@ -122,9 +76,9 @@ export function EntriesPage({ controller, state }: { controller: AppController; 
             aria-label="上一月"
             onClick={() => changeMonth(shiftMonth(month, -1))}
           >
-            ‹
+            <MdiChevronLeft className="size-5" />
           </button>
-          <div className="chip-row month-row">
+          <div className="chip-row month-row scrollbar-hidden">
             {options.map((option) => (
               <button
                 key={option.month}
@@ -145,7 +99,7 @@ export function EntriesPage({ controller, state }: { controller: AppController; 
             aria-label="下一月"
             onClick={() => changeMonth(shiftMonth(month, 1))}
           >
-            ›
+            <MdiChevronRight className="size-5" />
           </button>
         </div>
         <div className="month-total">
@@ -262,22 +216,18 @@ export function EntriesPage({ controller, state }: { controller: AppController; 
         </button>
       </section>
 
-      {feedback ? (
-        <p className={feedback.kind === 'ok' ? 'form-success' : 'form-error'}>{feedback.text}</p>
-      ) : null}
-
       {groups.length === 0 ? (
         <section className="placeholder-card">
           <p className="placeholder-title">本月还没有支出</p>
           <p className="placeholder-note">
-            {filtering ? '试试换个筛选条件,或清空筛选。' : '去「记一笔」记下第一笔吧。'}
+            {filtering ? '试试换个筛选条件,或清空筛选。' : '去首页的「记一笔」记下第一笔吧。'}
           </p>
         </section>
       ) : (
         groups.map((group) => (
           <section className="card" key={group.date}>
             <div className="day-header">
-              <span>{dayLabel(group.date)}</span>
+              <span>{formatDayLabel(group.date)}</span>
               <span className="day-total">{formatCents(group.totalCents)}</span>
             </div>
             <ul className="entry-list">
@@ -317,48 +267,6 @@ export function EntriesPage({ controller, state }: { controller: AppController; 
           </section>
         ))
       )}
-
-      {editing ? (
-        <div className="sheet-backdrop">
-          <section className="sheet" aria-label="编辑支出">
-            <div className="sheet-header">
-              <h2 className="card-title">编辑支出</h2>
-              <button
-                type="button"
-                className="link-button sheet-close"
-                onClick={() => setEditing(null)}
-              >
-                关闭
-              </button>
-            </div>
-            <ExpenseForm
-              categories={ledger.meta.categories}
-              members={state.members}
-              currentMemberId={state.member?.id}
-              values={editing.values}
-              onChange={(patch) =>
-                setEditing((current) =>
-                  current ? { ...current, values: { ...current.values, ...patch } } : current,
-                )
-              }
-              onSubmit={saveEdit}
-              submitLabel="保存修改"
-              submitting={busy}
-              feedback={sheetFeedback}
-              footer={
-                <button
-                  type="button"
-                  className="danger-button"
-                  disabled={busy}
-                  onClick={deleteEditing}
-                >
-                  删除这笔
-                </button>
-              }
-            />
-          </section>
-        </div>
-      ) : null}
     </div>
   )
 }

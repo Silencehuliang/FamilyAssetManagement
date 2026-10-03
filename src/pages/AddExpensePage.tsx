@@ -1,9 +1,6 @@
 import { useState } from 'react'
-import {
-  ExpenseForm,
-  type ExpenseFormFeedback,
-  type ExpenseFormValues,
-} from '../components/ExpenseForm'
+import { toast } from 'sonner'
+import { ExpenseForm, type ExpenseFormValues } from '../components/ExpenseForm'
 import { DEFAULT_CATEGORIES, DomainError } from '../domain'
 import {
   type EntryForm,
@@ -48,12 +45,10 @@ export function AddExpensePage({
     tagsText: '',
     memberId: state.member?.id ?? '',
   })
-  const [feedback, setFeedback] = useState<ExpenseFormFeedback | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
   const onSubmit = (resolved: { categoryId: string; memberId: string }): void => {
     setSubmitting(true)
-    setFeedback(null)
     const form: EntryForm = {
       amountText: values.amountText,
       parentId: values.parentId,
@@ -67,14 +62,12 @@ export function AddExpensePage({
       .recordExpense(form)
       .then(() => {
         setValues((current) => ({ ...current, amountText: '', note: '', tagsText: '' }))
-        setFeedback({ kind: 'ok', text: '已记下,可以继续记下一笔' })
+        toast.success('已记下,可以继续记下一笔')
       })
       .catch((err: unknown) => {
-        setFeedback({
-          kind: 'error',
-          text:
-            err instanceof DomainError || err instanceof Error ? err.message : '保存失败,请重试',
-        })
+        toast.error(
+          err instanceof DomainError || err instanceof Error ? err.message : '保存失败,请重试',
+        )
       })
       .finally(() => {
         setSubmitting(false)
@@ -108,7 +101,6 @@ export function AddExpensePage({
         onSubmit={onSubmit}
         submitLabel="记下这笔"
         submitting={submitting}
-        feedback={feedback}
         autoFocusAmount
       />
 

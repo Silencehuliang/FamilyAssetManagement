@@ -16,14 +16,8 @@ export interface ExpenseFormValues {
   memberId: string
 }
 
-export interface ExpenseFormFeedback {
-  kind: 'ok' | 'error'
-  text: string
-}
-
 interface ExpenseFormProps {
-  /** 可选分类;新增页在没有账本分类时传入默认分类 */
-  categories: Category[]
+  /** 可选分类;新增页在没有账本分类时传入默认分类 */ categories: Category[]
   /** 可选经手人(通常只列启用成员;编辑时需包含原经手人) */
   members: Member[]
   currentMemberId?: string
@@ -33,7 +27,6 @@ interface ExpenseFormProps {
   onSubmit: (resolved: { categoryId: string; memberId: string }) => void
   submitLabel: string
   submitting?: boolean
-  feedback?: ExpenseFormFeedback | null
   autoFocusAmount?: boolean
   /** 表单底部追加的自定义操作(如编辑态的删除按钮) */
   footer?: ReactNode
@@ -52,7 +45,6 @@ export function ExpenseForm({
   onSubmit,
   submitLabel,
   submitting = false,
-  feedback,
   autoFocusAmount = false,
   footer,
 }: ExpenseFormProps) {
@@ -160,10 +152,6 @@ export function ExpenseForm({
           onChange={(event) => onChange({ tagsText: event.target.value })}
         />
       </label>
-
-      {feedback ? (
-        <p className={feedback.kind === 'ok' ? 'form-success' : 'form-error'}>{feedback.text}</p>
-      ) : null}
 
       <button type="submit" className="primary-button" disabled={!canSubmit}>
         {submitting ? '保存中…' : submitLabel}
