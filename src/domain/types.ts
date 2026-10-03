@@ -71,6 +71,8 @@ export interface TagGroup {
   singleSelect?: boolean
   /** 每笔支出都应从中选中一个;组内无可用标签时规则自动失效 */
   required?: boolean
+  /** 展示排序位次(V6 管理界面的上移/下移维护);旧数据缺省时按数组原序排在末尾 */
+  sortOrder?: number
 }
 
 export interface Budget {

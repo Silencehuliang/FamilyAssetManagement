@@ -8,9 +8,11 @@ import MdiCogOutline from '~icons/mdi/cog-outline'
 import MdiLockOutline from '~icons/mdi/lock-outline'
 import MdiLogoutVariant from '~icons/mdi/logout-variant'
 import MdiShapeOutline from '~icons/mdi/shape-outline'
+import MdiTagOutline from '~icons/mdi/tag-outline'
 import MdiThemeLightDark from '~icons/mdi/theme-light-dark'
 import { PopupLayout, useDialog } from '../components/dialog'
 import { SYNC_LABELS } from '../components/SyncBadge'
+import { useTagManager } from '../components/tag'
 import { type ThemeChoice, useTheme } from '../components/theme'
 import { errorText } from '../lib/errors'
 import type { AppController, AppState } from '../state/app-controller'
@@ -63,6 +65,7 @@ export function MePage({
   const member = state.member
   const { theme, setTheme } = useTheme()
   const { showDialog } = useDialog()
+  const openTagManager = useTagManager(controller)
 
   const openPassword = (): void => {
     void showDialog<void>(
@@ -99,6 +102,7 @@ export function MePage({
         <div className="flex flex-col">
           <SettingRow icon={MdiCalendarSyncOutline} label="周期支出" onClick={onOpenRecurring} />
           <SettingRow icon={MdiShapeOutline} label="分类管理" onClick={onOpenCategories} />
+          <SettingRow icon={MdiTagOutline} label="标签管理" onClick={openTagManager} />
           {member?.role === 'admin' ? (
             <SettingRow icon={MdiAccountGroupOutline} label="成员管理" onClick={onOpenMembers} />
           ) : null}
