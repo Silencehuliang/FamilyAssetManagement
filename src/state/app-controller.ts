@@ -75,7 +75,7 @@ import {
   splitTags,
   todayKey,
 } from '../features/entry'
-import { tagUsageCount as countTagUsage } from '../features/tags'
+import { tagUsageCount as countTagUsage, nextTagGroupSortOrder } from '../features/tags'
 import { errorText } from '../lib/errors'
 import type { LocalStore } from '../storage'
 import { MemoryLocalStore, PersistentQueue } from '../storage'
@@ -395,7 +395,7 @@ export class AppController {
     addTagGroupInLedger(this.ledger, actor, {
       ...input,
       id,
-      sortOrder: input.sortOrder ?? this.nextTagGroupOrder(),
+      sortOrder: input.sortOrder ?? nextTagGroupSortOrder(this.ledger.meta.tagGroups),
     })
     const created = this.ledger.meta.tagGroups.find((group) => group.id === id)
     if (!created) throw new Error('新增标签组后未找到记录')
@@ -427,14 +427,6 @@ export class AppController {
     setTagGroupOrderInLedger(this.ledger, actor, orderedIds)
     await this.persistLedger()
     void this.syncManager?.syncNow()
-  }
-
-  private nextTagGroupOrder(): number {
-    let max = -1
-    for (const group of this.ledger.meta.tagGroups) {
-      if (group.sortOrder !== undefined) max = Math.max(max, group.sortOrder)
-    }
-    return max + 1
   }
 
   /**

@@ -14,10 +14,12 @@ import {
 } from '../../features/editor'
 import { todayKey } from '../../features/entry'
 import {
+  canSaveFormula,
   editorKeyFromKeyboard,
   type FormulaKey,
-  formulaAmountCents,
+  moveCaret,
   pressKey,
+  setCaret,
 } from '../../features/formula'
 import { tagSelectionRows } from '../../features/tags'
 import { errorText } from '../../lib/errors'
@@ -56,18 +58,16 @@ export function BillEditorDialog({
       ? draftFromExpense(ledger, expense, memberId)
       : draftForNew(ledger, memberId, todayKey()),
   )
-  const [caret, setCaret] = useState<number | null>(null)
   const [busy, setBusy] = useState(false)
   const savingRef = useRef(false)
 
-  const amountCents = formulaAmountCents(draft.formula)
-  const canSave = amountCents > 0 && !busy
+  const canSave = canSaveFormula(draft.formula) && !busy
   const rows = tagSelectionRows(ledger)
   const categories = editorCategories(ledger)
 
   const save = useCallback(
     (again: boolean): void => {
-      if (savingRef.current || formulaAmountCents(draft.formula) <= 0) return
+      if (savingRef.current || !canSaveFormula(draft.formula)) return
       savingRef.current = true
       setBusy(true)
       try {
@@ -80,7 +80,6 @@ export function BillEditorDialog({
             if (again && !expense) {
               // 再记:存掉当前笔,开新单仅保留日期
               setDraft(draftForAgain(ledger, memberId, draft.date))
-              setCaret(null)
             } else {
               onClose()
             }
@@ -130,8 +129,14 @@ export function BillEditorDialog({
         if (!expense) save(true)
         return
       }
+      if (action === 'left' || action === 'right') {
+        setDraft((current) => ({
+          ...current,
+          formula: moveCaret(current.formula, action === 'left' ? -1 : 1),
+        }))
+        return
+      }
       setDraft((current) => ({ ...current, formula: pressKey(current.formula, action) }))
-      setCaret(null)
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
@@ -139,7 +144,6 @@ export function BillEditorDialog({
 
   const pressKeypad = (key: FormulaKey): void => {
     setDraft((current) => ({ ...current, formula: pressKey(current.formula, key) }))
-    setCaret(null)
   }
 
   const toggleTag = (group: TagGroup | null, tagId: TagId): void => {
@@ -177,7 +181,12 @@ export function BillEditorDialog({
   return (
     <PopupLayout title={expense ? '编辑支出' : '记一笔'}>
       <div data-bill-editor className="flex min-h-full flex-col gap-3">
-        <FormulaAmount formula={draft.formula} caret={caret} onCaret={setCaret} />
+        <FormulaAmount
+          formula={draft.formula}
+          onCaret={(index) =>
+            setDraft((current) => ({ ...current, formula: setCaret(current.formula, index) }))
+          }
+        />
 
         <CategoryGrid
           categories={categories}

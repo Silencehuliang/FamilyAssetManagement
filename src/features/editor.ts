@@ -10,6 +10,7 @@ import {
   type Expense,
   type ExpenseInput,
   type ExpensePatch,
+  isValidAmountCents,
   type LedgerData,
   type MemberId,
   type TagGroup,
@@ -134,6 +135,7 @@ function assertDraftFields(
 ): { amountCents: number; note: string } {
   const amountCents = formulaAmountCents(draft.formula)
   if (amountCents <= 0) throw new DomainError('invalid_amount', '请输入大于 0 的金额')
+  if (!isValidAmountCents(amountCents)) throw new DomainError('invalid_amount', '金额超出上限')
   if (!DATE_RE.test(draft.date)) throw new DomainError('invalid_date', '请选择有效日期')
   const category = editorCategories(ledger).find((item) => item.id === draft.categoryId)
   if (!category) throw new DomainError('unknown_category', '请选择分类')

@@ -27,8 +27,9 @@ export function tagUsageCount(ledger: LedgerData, tagId: TagId): number {
 }
 
 /**
- * 支出携带的标签名字(读路径):按 tagIds 从账本实体解析,未知 id 静默过滤;
+ * 支出携带的标签名字(读路径,唯一实现):按 tagIds 从账本实体解析,未知 id 静默过滤;
  * 一个都解析不到且记录仍带 v1 tagNames 时回退旧字段(迁移完成前的旧缓存)。
+ * 首页/明细页/编辑回填共用本函数(评审修复:原 features/entries.ts 有一份逐字重复)。
  */
 export function resolveExpenseTagNames(ledger: LedgerData, expense: Expense): string[] {
   const names: string[] = []
@@ -40,13 +41,30 @@ export function resolveExpenseTagNames(ledger: LedgerData, expense: Expense): st
   return names
 }
 
-/** 标签组的展示顺序:有 sortOrder 的按它升序,缺省(旧数据)保持数组原序排在末尾 */
+/**
+ * 标签组的排序位次:缺省(旧数据)按 0 参与排序。
+ * 与 `nextTagGroupSortOrder` 共用本函数,保证「新建组取最大 +1」与展示排序对
+ * undefined 的处理一致(#29 评审修复:曾出现新组排到旧的无序组之前)。
+ */
+export function tagGroupSortOrder(group: TagGroup): number {
+  return group.sortOrder ?? 0
+}
+
+/** 标签组展示排序比较器(sortOrder 升序,缺省按 0);稳定排序保持同档的数组原序 */
+export function compareTagGroups(a: TagGroup, b: TagGroup): number {
+  return tagGroupSortOrder(a) - tagGroupSortOrder(b)
+}
+
+/** 下一个可用的组排序位次:所有组(缺省按 0)最大 +1,保证新组排在既有组之后 */
+export function nextTagGroupSortOrder(groups: readonly TagGroup[]): number {
+  let max = -1
+  for (const group of groups) max = Math.max(max, tagGroupSortOrder(group))
+  return max + 1
+}
+
+/** 标签组的展示顺序:sortOrder 升序,缺省(旧数据)按 0,与新建组的位次规则一致 */
 export function sortedTagGroups(groups: readonly TagGroup[]): TagGroup[] {
-  return [...groups].sort((a, b) => {
-    const orderA = a.sortOrder ?? Number.MAX_SAFE_INTEGER
-    const orderB = b.sortOrder ?? Number.MAX_SAFE_INTEGER
-    return orderA - orderB
-  })
+  return [...groups].sort(compareTagGroups)
 }
 
 /** 标签管理对话框的一段:组 + 组内标签(按组 tagIds 顺序,未知 id 过滤) */

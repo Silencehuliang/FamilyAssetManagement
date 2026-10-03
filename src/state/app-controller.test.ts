@@ -19,6 +19,7 @@ import {
 } from '../domain'
 import { ADMIN, fixtureLedger, LUNCH_CATEGORY, NOW, XIAOHONG } from '../domain/fixtures'
 import { expenseToForm } from '../features/entries'
+import { sortedTagGroups } from '../features/tags'
 import { MemoryLocalStore } from '../storage'
 import { InMemoryEndpoint } from '../sync'
 import { type AppApi, AppController } from './app-controller'
@@ -1208,6 +1209,22 @@ describe('AppController 标签与标签组管理(V6)', () => {
     expect(files['ledger/meta/tagGroups.json']?.content).not.toContain('grp-fixed-1')
     expect(files['ledger/meta/tagGroups.json']?.content).toContain('grp-fixed-2')
     await expect(store.loadQueueOps()).resolves.toEqual([])
+  })
+
+  it('回归(#29):旧组缺 sortOrder 时新建组仍排最后', async () => {
+    const { controller } = await readyController(ADMIN, () => 'fixed-new')
+    // 旧数据(V6 之前落库的组)没有 sortOrder 字段
+    controller.getLedger().meta.tagGroups = [
+      { id: 'grp-legacy-1', name: '旧一', color: 'blue', tagIds: [] },
+      { id: 'grp-legacy-2', name: '旧二', color: 'red', tagIds: [] },
+    ]
+
+    const created = await controller.addTagGroup({ name: '新组', color: 'gray' })
+
+    expect(created).toMatchObject({ id: 'grp-fixed-new', sortOrder: 1 })
+    expect(sortedTagGroups(controller.getLedger().meta.tagGroups).map((group) => group.id)).toEqual(
+      ['grp-legacy-1', 'grp-legacy-2', 'grp-fixed-new'],
+    )
   })
 })
 

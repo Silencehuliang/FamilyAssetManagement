@@ -4,6 +4,7 @@ import { ADMIN, fixtureLedger, NOW, XIAOHONG } from '../domain/fixtures'
 import {
   moveGroupId,
   moveItem,
+  nextTagGroupSortOrder,
   resolveExpenseTagNames,
   sortedTagGroups,
   TAG_CHIP_ACTIVE_CLASS,
@@ -11,6 +12,7 @@ import {
   TAG_DOT_CLASS,
   TAG_PALETTE,
   TAG_SWATCH_ACTIVE_CLASS,
+  tagGroupSortOrder,
   tagManagerSections,
   tagSelectionRows,
   tagUsageCount,
@@ -112,15 +114,37 @@ describe('tagManagerSections(管理界面分区)', () => {
 })
 
 describe('sortedTagGroups(展示排序)', () => {
-  it('sortOrder 升序;缺省(旧数据)保持数组原序排在末尾;不改动原数组', () => {
+  it('sortOrder 升序;缺省(旧数据)按 0 参与排序;不改动原数组', () => {
     const groups: TagGroup[] = [
       { id: 'g-a', name: '甲', color: 'blue', tagIds: [] },
       { id: 'g-b', name: '乙', color: 'red', tagIds: [], sortOrder: 5 },
       { id: 'g-c', name: '丙', color: 'gray', tagIds: [], sortOrder: 1 },
     ]
 
-    expect(sortedTagGroups(groups).map((group) => group.id)).toEqual(['g-c', 'g-b', 'g-a'])
+    expect(tagGroupSortOrder({ id: 'g-x', name: '无位次', color: 'gray', tagIds: [] })).toBe(0)
+    expect(sortedTagGroups(groups).map((group) => group.id)).toEqual(['g-a', 'g-c', 'g-b'])
     expect(groups.map((group) => group.id)).toEqual(['g-a', 'g-b', 'g-c'])
+  })
+
+  it('回归(#29):旧组缺 sortOrder + 新建组 → 新组排在最后', () => {
+    const legacy: TagGroup[] = [
+      { id: 'g-old-1', name: '旧一', color: 'blue', tagIds: [] },
+      { id: 'g-old-2', name: '旧二', color: 'red', tagIds: [] },
+    ]
+    const created: TagGroup = {
+      id: 'g-new',
+      name: '新组',
+      color: 'gray',
+      tagIds: [],
+      sortOrder: nextTagGroupSortOrder(legacy), // 旧实现忽略 undefined → 0,新组会排到旧组前
+    }
+
+    expect(created.sortOrder).toBe(1)
+    expect(sortedTagGroups([created, ...legacy]).map((group) => group.id)).toEqual([
+      'g-old-1',
+      'g-old-2',
+      'g-new',
+    ])
   })
 })
 

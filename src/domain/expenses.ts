@@ -68,9 +68,23 @@ function assertActive(member: Member): void {
   if (member.disabled) throw new DomainError('member_disabled', `成员已停用:${member.displayName}`)
 }
 
+/**
+ * 金额上限(分):10^13 = 1000 亿元。公式编辑器允许 16 位数字,换算成分可达 ~1e18,
+ * 超过 Number.MAX_SAFE_INTEGER 后继续累加/求值不再可靠,故写入前必须拦下。
+ */
+export const MAX_AMOUNT_CENTS = 10_000_000_000_000
+
+/** 合法金额:正的安全整数分且不超过 MAX_AMOUNT_CENTS(领域校验与编辑器保存谓词共用) */
+export function isValidAmountCents(amountCents: number): boolean {
+  return Number.isSafeInteger(amountCents) && amountCents > 0 && amountCents <= MAX_AMOUNT_CENTS
+}
+
 function assertValidAmount(amountCents: number): void {
-  if (!Number.isInteger(amountCents) || amountCents <= 0) {
-    throw new DomainError('invalid_amount', `金额必须为正整数分:${amountCents}`)
+  if (!isValidAmountCents(amountCents)) {
+    throw new DomainError(
+      'invalid_amount',
+      `金额必须为正整数分且不超过 ${MAX_AMOUNT_CENTS}:${amountCents}`,
+    )
   }
 }
 

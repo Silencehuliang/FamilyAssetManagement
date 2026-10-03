@@ -7,13 +7,13 @@ import {
   canEditExpense,
   type DateKey,
   type Expense,
-  expenseTagIds,
   type LedgerData,
   type Member,
   type MemberId,
   type MonthKey,
 } from '../domain'
 import type { EntryForm } from './entry'
+import { resolveExpenseTagNames } from './tags'
 
 export interface EntryFilters {
   /** 父分类 id;'' 表示不限 */
@@ -57,23 +57,9 @@ function categoryNamesOf(category: Category | undefined, byId: Map<string, Categ
 }
 
 /**
- * 标签名字解析(读路径,评审修复):优先按 tagIds 从账本实体解析(未知 id 静默
- * 过滤,删除实体后遗留的引用不显示);一个都解析不到且记录仍带 v1 tagNames 时
- * 回退旧字段 —— 迁移完成前的旧缓存与离线账本仍能正确显示。
- */
-function tagNamesOf(ledger: LedgerData, expense: Expense): string[] {
-  const names: string[] = []
-  for (const id of expenseTagIds(expense)) {
-    const tag = ledger.meta.tags.find((item) => item.id === id)
-    if (tag) names.push(tag.name)
-  }
-  if (names.length === 0 && Array.isArray(expense.tagNames)) return [...expense.tagNames]
-  return names
-}
-
-/**
  * 组合筛选:分类(父/子)、成员、标签、关键词,彼此为「与」关系。
  * 关键词命中备注、分类名(含父分类)或任一标签的子串(忽略大小写)。
+ * 标签名字统一由 features/tags.ts 的 `resolveExpenseTagNames` 解析(实体优先,旧字段兜底)。
  */
 export function filterExpenses(
   ledger: LedgerData,
@@ -89,7 +75,7 @@ export function filterExpenses(
       if (category?.parentId !== filters.parentId) return false
     }
     if (filters.memberId !== '' && expense.memberId !== filters.memberId) return false
-    const tagNames = tagNamesOf(ledger, expense)
+    const tagNames = resolveExpenseTagNames(ledger, expense)
     if (filters.tag !== '' && !tagNames.includes(filters.tag)) return false
     if (keyword !== '') {
       const haystack = [
@@ -122,7 +108,7 @@ export function groupByDay(ledger: LedgerData, expenses: Expense[]): DayGroupEnt
   const buckets = new Map<DateKey, EntryView[]>()
   for (const expense of expenses) {
     const bucket = buckets.get(expense.date) ?? []
-    bucket.push({ ...expense, tagNames: tagNamesOf(ledger, expense) })
+    bucket.push({ ...expense, tagNames: resolveExpenseTagNames(ledger, expense) })
     buckets.set(expense.date, bucket)
   }
   const groups: DayGroupEntries[] = []
@@ -159,7 +145,7 @@ export function sumCents(expenses: Expense[]): number {
 export function tagsOfMonth(ledger: LedgerData, month: MonthKey): string[] {
   const tags = new Set<string>()
   for (const expense of ledger.months[month]?.expenses ?? []) {
-    for (const tag of tagNamesOf(ledger, expense)) tags.add(tag)
+    for (const tag of resolveExpenseTagNames(ledger, expense)) tags.add(tag)
   }
   return [...tags].sort((a, b) => TAG_COLLATOR.compare(a, b))
 }
@@ -230,7 +216,7 @@ export function expenseToForm(ledger: LedgerData, expense: Expense): EntryForm {
     categoryId: expense.categoryId,
     date: expense.date,
     note: expense.note ?? '',
-    tagsText: tagNamesOf(ledger, expense).join(', '),
+    tagsText: resolveExpenseTagNames(ledger, expense).join(', '),
     memberId: expense.memberId,
   }
 }
