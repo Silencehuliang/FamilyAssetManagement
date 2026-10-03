@@ -103,40 +103,45 @@ function Shell({ state }: { state: AppState }) {
         <SyncBadge status={state.syncStatus} />
       </header>
       <main className="app-main pb-[calc(5.5rem+var(--safe-area-inset-bottom))] sm:pb-8 sm:pl-[84px]">
-        {view === 'categories' ? (
-          <CategoriesPage controller={appController} state={state} onBack={() => setView(null)} />
-        ) : null}
-        {view === 'members' ? (
-          <MembersPage controller={appController} state={state} onBack={() => setView(null)} />
-        ) : null}
-        {view === 'recurring' ? (
-          <RecurringPage controller={appController} state={state} onBack={() => setView(null)} />
-        ) : null}
-        {view === null ? (
-          <>
-            {route === 'home' ? (
-              <HomePage
-                controller={appController}
-                state={state}
-                onOpenAdd={() => navigate('add')}
-                onOpenStats={() => navigate('stats')}
-              />
-            ) : null}
-            {route === 'entries' ? <EntriesPage controller={appController} state={state} /> : null}
-            {route === 'stats' ? <StatsPage state={state} /> : null}
-            {route === 'budget' ? <BudgetPage controller={appController} state={state} /> : null}
-            {route === 'me' ? (
-              <MePage
-                controller={appController}
-                state={state}
-                onOpenCategories={() => setView('categories')}
-                onOpenMembers={() => setView('members')}
-                onOpenRecurring={() => setView('recurring')}
-              />
-            ) : null}
-            {route === 'add' ? <AddExpensePage controller={appController} state={state} /> : null}
-          </>
-        ) : null}
+        <div key={view ?? route} className="page-show">
+          {view === 'categories' ? (
+            <CategoriesPage controller={appController} state={state} onBack={() => setView(null)} />
+          ) : null}
+          {view === 'members' ? (
+            <MembersPage controller={appController} state={state} onBack={() => setView(null)} />
+          ) : null}
+          {view === 'recurring' ? (
+            <RecurringPage controller={appController} state={state} onBack={() => setView(null)} />
+          ) : null}
+          {view === null ? (
+            <>
+              {route === 'home' ? (
+                <HomePage
+                  controller={appController}
+                  state={state}
+                  onOpenAdd={() => navigate('add')}
+                  onOpenStats={() => navigate('stats')}
+                  onOpenBudget={() => navigate('budget')}
+                />
+              ) : null}
+              {route === 'entries' ? (
+                <EntriesPage controller={appController} state={state} />
+              ) : null}
+              {route === 'stats' ? <StatsPage state={state} /> : null}
+              {route === 'budget' ? <BudgetPage controller={appController} state={state} /> : null}
+              {route === 'me' ? (
+                <MePage
+                  controller={appController}
+                  state={state}
+                  onOpenCategories={() => setView('categories')}
+                  onOpenMembers={() => setView('members')}
+                  onOpenRecurring={() => setView('recurring')}
+                />
+              ) : null}
+              {route === 'add' ? <AddExpensePage controller={appController} state={state} /> : null}
+            </>
+          ) : null}
+        </div>
       </main>
       <AppNav route={route} onNavigate={navigate} onCreate={openEditor} />
     </div>

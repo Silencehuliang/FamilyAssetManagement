@@ -916,3 +916,19 @@
     display: none;
   }
 }
+
+/* 页面切换过渡(V4):透明度 + 轻微缩放 */
+.page-show {
+  animation: page-show 0.25s ease-out both;
+}
+
+@keyframes page-show {
+  from {
+    opacity: 0;
+    transform: scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
