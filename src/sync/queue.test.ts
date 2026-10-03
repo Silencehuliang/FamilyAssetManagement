@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Expense, LedgerData, Member, MutationContext } from '../domain'
-import { addExpense, deleteExpense } from '../domain'
+import { addExpense, deleteExpense, deleteTag, deleteTagGroup } from '../domain'
+import { sync } from './engine'
 import { filesToLedger, ledgerToFiles, monthFilePath } from './files'
 import { InMemoryEndpoint } from './in-memory'
 import { PendingQueue, replay } from './queue'
@@ -77,6 +78,19 @@ function monthContentOf(ledger: LedgerData, month: string): string {
   const content = ledgerToFiles(ledger)[monthFilePath(month)]
   if (content === undefined) throw new Error(`测试辅助:${month} 无月份文件`)
   return content
+}
+
+/** 带标签、标签组且支出引用该标签的基线账本 */
+function taggedLedger(): LedgerData {
+  const ledger = baseLedger()
+  ledger.meta.tags = [{ id: 'tag-1', name: '微信', updatedAt: T0 }]
+  ledger.meta.tagGroups = [
+    { id: 'g-1', name: '支付方式', color: 'blue', tagIds: ['tag-1'], singleSelect: true },
+  ]
+  const expense = ledger.months['2026-10']?.expenses[0]
+  if (!expense) throw new Error('fixture: 基线支出缺失')
+  expense.tagIds = ['tag-1']
+  return ledger
 }
 
 describe('replay', () => {
@@ -226,6 +240,83 @@ describe('replay', () => {
     await replay(queue, local, shared)
 
     expect(filesToLedger(await contentsOf(shared))).toEqual(sansMembers(local))
+    expect(queue.size).toBe(0)
+  })
+
+  it('标签与标签组删除按登记顺序回放(合并复活后补删并推送),第二台设备同步后同样干净', async () => {
+    const baseline = taggedLedger()
+    const shared = new InMemoryEndpoint(ledgerToFiles(baseline))
+    const local = structuredClone(baseline)
+
+    // 离线:领域层删除 + 逐条登记(标签删除会刷新受影响支出的 updatedAt)
+    deleteTag(local, MEMBER, 'tag-1', '2026-10-02T09:00:00.000Z')
+    deleteTagGroup(local, MEMBER, 'g-1')
+    const queue = new PendingQueue()
+    queue.record({ type: 'delete-tag', id: 'tag-1' })
+    queue.record({ type: 'delete-tag-group', id: 'g-1' })
+    expect(queue.pending.map((op) => op.type)).toEqual(['delete-tag', 'delete-tag-group'])
+
+    const result = await replay(queue, local, shared)
+
+    // 远端旧副本会在合并中复活实体与组,靠补删写回:支出清理 + tags + tagGroups 各一次
+    expect(result.pushedFiles).toBe(3)
+    const remoteLedger = filesToLedger(await contentsOf(shared))
+    expect(remoteLedger).toEqual(sansMembers(local))
+    expect(remoteLedger.meta.tags).toEqual([])
+    expect(remoteLedger.meta.tagGroups).toEqual([])
+    expect(remoteLedger.months['2026-10']?.expenses[0]?.tagIds).toEqual([])
+    expect(queue.size).toBe(0)
+
+    // 第二台设备从端点拉取并再同步:不持有已删除的标签/组,引用保持干净
+    const deviceB = filesToLedger(await contentsOf(shared))
+    await sync(deviceB, shared)
+    expect(deviceB.meta.tags).toEqual([])
+    expect(deviceB.meta.tagGroups).toEqual([])
+    expect(deviceB.months['2026-10']?.expenses[0]?.tagIds).toEqual([])
+  })
+
+  it('delete-tag:远端更新的旧副本复活引用时,回放防御性再清理并推送月份文件', async () => {
+    const remote = taggedLedger()
+    const remoteExpense = remote.months['2026-10']?.expenses[0]
+    if (!remoteExpense) throw new Error('fixture: 远端支出缺失')
+    remoteExpense.updatedAt = '2026-10-02T10:00:00.000Z' // 晚于本地删除时刻,LWW 会选中它
+    const shared = new InMemoryEndpoint(ledgerToFiles(remote))
+
+    const local = taggedLedger()
+    deleteTag(local, MEMBER, 'tag-1', '2026-10-02T09:00:00.000Z')
+    const queue = new PendingQueue()
+    queue.record({ type: 'delete-tag', id: 'tag-1' })
+
+    const result = await replay(queue, local, shared)
+
+    // 合并按 LWW 复活了远端引用;本地意图(删除标签)在回放时再次生效
+    expect(local.meta.tags).toEqual([])
+    expect(local.meta.tagGroups).toEqual([
+      { id: 'g-1', name: '支付方式', color: 'blue', tagIds: [], singleSelect: true },
+    ])
+    expect(local.months['2026-10']?.expenses[0]?.tagIds).toEqual([])
+    expect(result.pushedFiles).toBe(3) // tags + 支出月份 + 标签组引用清理
+    expect(filesToLedger(await contentsOf(shared))).toEqual(sansMembers(local))
+    expect(queue.size).toBe(0)
+  })
+
+  it('delete-tag-group:只补删组,标签实体与支出引用不受影响', async () => {
+    const baseline = taggedLedger()
+    const shared = new InMemoryEndpoint(ledgerToFiles(baseline))
+    const local = structuredClone(baseline)
+
+    deleteTagGroup(local, MEMBER, 'g-1')
+    const queue = new PendingQueue()
+    queue.record({ type: 'delete-tag-group', id: 'g-1' })
+
+    await replay(queue, local, shared)
+
+    expect(local.meta.tagGroups).toEqual([])
+    expect(local.meta.tags.map((t) => t.id)).toEqual(['tag-1'])
+    expect(local.months['2026-10']?.expenses[0]?.tagIds).toEqual(['tag-1'])
+    const remoteLedger = filesToLedger(await contentsOf(shared))
+    expect(remoteLedger).toEqual(sansMembers(local))
+    expect(remoteLedger.meta.tags.map((t) => t.id)).toEqual(['tag-1'])
     expect(queue.size).toBe(0)
   })
 })

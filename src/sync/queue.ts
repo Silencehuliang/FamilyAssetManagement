@@ -1,4 +1,13 @@
-import type { CategoryId, ExpenseId, LedgerData, MonthKey, RecurringId } from '../domain'
+import type {
+  CategoryId,
+  ExpenseId,
+  LedgerData,
+  MonthKey,
+  RecurringId,
+  TagGroupId,
+  TagId,
+} from '../domain'
+import { expenseTagIds } from '../domain'
 import type { SyncEndpoint } from './endpoint'
 import type { SyncOptions, SyncResult } from './engine'
 import { pushFiles, sync } from './engine'
@@ -8,6 +17,8 @@ import {
   ledgerToFiles,
   monthFilePath,
   RECURRING_FILE,
+  TAG_GROUPS_FILE,
+  TAGS_FILE,
 } from './files'
 
 /**
@@ -21,7 +32,8 @@ import {
  * - 删除支出/周期支出携带删除时刻 deletedAt:回放时若合并结果中同 id 记录仍存在、
  *   且其 updatedAt ≤ deletedAt,则补删并推送(晚于删除的编辑按 LWW 胜出,予以保留)。
  *   时间为 ISO-8601 字符串,可直接做字典序比较。
- * - 删除成员/分类/清空预算:无时间戳,按本地意图补删(本地为准)。
+ * - 删除成员/分类/标签/标签组、清空预算:无时间戳,按本地意图补删(本地为准);
+ *   标签删除还会再次清理支出与标签组中的引用,并推送实际变化的文件。
  *
  * 已知限制(v1):墓碑不进入同步数据。若另一台设备从未同步过这次删除、其旧副本仍
  * 持有该记录,它的下一轮 sync 会把记录推回远端。跨设备删除传播需要把墓碑持久化进
@@ -38,6 +50,8 @@ export type PendingOp =
     }
   | { type: 'delete-recurring'; id: RecurringId; deletedAt: string }
   | { type: 'delete-category'; id: CategoryId }
+  | { type: 'delete-tag'; id: TagId }
+  | { type: 'delete-tag-group'; id: TagGroupId }
   | { type: 'clear-budget'; month: MonthKey }
 // 注:成员数据由服务端专管(members.json 不属同步文件集),成员的停用/删除
 // 走鉴权端点,不经离线队列。
@@ -97,6 +111,39 @@ function applyDeleteOp(local: LedgerData, op: PendingOp, touched: Set<string>): 
       const before = local.meta.categories.length
       local.meta.categories = local.meta.categories.filter((c) => c.id !== op.id)
       if (local.meta.categories.length !== before) touched.add(CATEGORIES_FILE)
+      return
+    }
+    case 'delete-tag': {
+      const hadTag = local.meta.tags.some((t) => t.id === op.id)
+      local.meta.tags = local.meta.tags.filter((t) => t.id !== op.id)
+      if (hadTag) touched.add(TAGS_FILE)
+      // 防御性再清理:并集合并可能从远端旧副本复活引用;实际变化的文件一并推送
+      for (const [month, data] of Object.entries(local.months)) {
+        let changed = false
+        const expenses = data.expenses.map((expense) => {
+          const tagIds = expenseTagIds(expense)
+          if (!tagIds.includes(op.id)) return expense
+          changed = true
+          return { ...expense, tagIds: tagIds.filter((tagId) => tagId !== op.id) }
+        })
+        if (changed) {
+          local.months[month] = { expenses }
+          touched.add(monthFilePath(month))
+        }
+      }
+      let groupsChanged = false
+      local.meta.tagGroups = local.meta.tagGroups.map((group) => {
+        if (!group.tagIds.includes(op.id)) return group
+        groupsChanged = true
+        return { ...group, tagIds: group.tagIds.filter((tagId) => tagId !== op.id) }
+      })
+      if (groupsChanged) touched.add(TAG_GROUPS_FILE)
+      return
+    }
+    case 'delete-tag-group': {
+      const before = local.meta.tagGroups.length
+      local.meta.tagGroups = local.meta.tagGroups.filter((g) => g.id !== op.id)
+      if (local.meta.tagGroups.length !== before) touched.add(TAG_GROUPS_FILE)
       return
     }
     case 'clear-budget': {
