@@ -1,4 +1,13 @@
-import type { Budget, Category, Expense, LedgerData, Member, MonthKey } from '../domain'
+import type {
+  Budget,
+  Category,
+  Expense,
+  LedgerData,
+  Member,
+  MonthKey,
+  Tag,
+  TagGroup,
+} from '../domain'
 import type { RemoteFile, SyncEndpoint } from './endpoint'
 import {
   BUDGETS_FILE,
@@ -6,18 +15,22 @@ import {
   filesToLedger,
   isLedgerFilePath,
   ledgerToFiles,
+  TAG_GROUPS_FILE,
 } from './files'
 
 /**
  * 同步引擎:一轮「拉取 → 记录级合并 → 增量推送」(ADR-0004)。
  *
- * 合并规则(v1):
+ * 合并规则(v1.1):
  * - 支出与周期支出:按 id 取并集;双方都有时按 updatedAt 后写胜出(LWW)。
  *   同一时刻(updatedAt 相同)而内容不同时,取 JSON 序列化后字典序更大的一方——
  *   该规则与「谁是本地、谁是远端」无关,保证多端在同刻冲突下收敛到同一结果。
  * - 成员:远端只补本地缺失的 id,双方都有时保留本地。
+ * - 标签(ADR-0006):双方均可写,按 id 并集、updatedAt 后写胜出(LWW);标签删除
+ *   由领域层清理引用(支出引用经 updatedAt 传播);并集合并本身不表达「实体删除」。
  * - 分类:默认远端只补缺、双方都有保留本地;adminFilesPolicy='remote-wins' 时
  *   采用远端文件(成员端采纳管理员改动,不用旧副本回推)。
+ * - 标签组:同分类走 adminFilesPolicy(成员端 remote-wins,管理员端 local-wins)。
  * - 预算:默认按月份键合并(本地优先);remote-wins 时采用远端文件。
  * - 支出按其日期所属月份重新归档:记录被改期后自动换月文件,旧月份随之清空。
  *
@@ -136,7 +149,11 @@ function groupByMonth(expenses: Expense[]): Record<MonthKey, { expenses: Expense
 function mergeLedgers(
   local: LedgerData,
   remote: LedgerData,
-  policies: { categories: AdminFilesPolicy; budgets: AdminFilesPolicy },
+  policies: {
+    categories: AdminFilesPolicy
+    tagGroups: AdminFilesPolicy
+    budgets: AdminFilesPolicy
+  },
 ): { merged: LedgerData; conflictsResolved: number } {
   const counter: Counter = { n: 0 }
   const expenses = mergeTimestamped(
@@ -146,10 +163,16 @@ function mergeLedgers(
   )
   const recurring = mergeTimestamped(local.meta.recurring, remote.meta.recurring, counter)
   const members = mergeWithoutTimestamps<Member>(local.meta.members, remote.meta.members)
+  // 标签双方可写:按 id 并集 + LWW(记录级),与文件级策略无关
+  const tags = mergeTimestamped<Tag>(local.meta.tags, remote.meta.tags, counter)
   const categories =
     policies.categories === 'remote-wins'
       ? [...remote.meta.categories].sort(byId)
       : mergeWithoutTimestamps<Category>(local.meta.categories, remote.meta.categories)
+  const tagGroups =
+    policies.tagGroups === 'remote-wins'
+      ? [...remote.meta.tagGroups].sort(byId)
+      : mergeWithoutTimestamps<TagGroup>(local.meta.tagGroups, remote.meta.tagGroups)
   const budgets =
     policies.budgets === 'remote-wins'
       ? remote.meta.budgets
@@ -159,6 +182,8 @@ function mergeLedgers(
       meta: {
         members,
         categories,
+        tags,
+        tagGroups,
         budgets,
         recurring,
       },
@@ -219,6 +244,7 @@ export async function sync(
   const remoteWins = options.adminFilesPolicy === 'remote-wins'
   const { merged, conflictsResolved } = mergeLedgers(local, filesToLedger(remoteContent), {
     categories: remoteWins && CATEGORIES_FILE in remoteContent ? 'remote-wins' : 'local-wins',
+    tagGroups: remoteWins && TAG_GROUPS_FILE in remoteContent ? 'remote-wins' : 'local-wins',
     budgets: remoteWins && BUDGETS_FILE in remoteContent ? 'remote-wins' : 'local-wins',
   })
   local.meta = merged.meta

@@ -25,7 +25,7 @@ function expense(
     amountCents: 1000,
     date,
     categoryId: 'cat-x',
-    tagNames: [],
+    tagIds: [],
     memberId: 'm-1',
     recordedBy: 'm-1',
     createdAt: updatedAt,
@@ -94,19 +94,21 @@ class SpyEndpoint implements SyncEndpoint {
 }
 
 describe('sync', () => {
-  it('空账本同步到空端点:恰好 3 个 meta 文件(members.json 服务端专管),无月份文件', async () => {
+  it('空账本同步到空端点:恰好 5 个 meta 文件(members.json 服务端专管),无月份文件', async () => {
     const local = createEmptyLedger()
     const endpoint = new InMemoryEndpoint()
 
     const result = await sync(local, endpoint)
 
-    expect(result).toEqual({ pulledFiles: 0, pushedFiles: 3, conflictsResolved: 0 })
+    expect(result).toEqual({ pulledFiles: 0, pushedFiles: 5, conflictsResolved: 0 })
     const files = await endpoint.listFiles()
     expect(Object.keys(files).sort()).toEqual(
       [
         'ledger/meta/budgets.json',
         'ledger/meta/categories.json',
         'ledger/meta/recurring.json',
+        'ledger/meta/tagGroups.json',
+        'ledger/meta/tags.json',
       ].sort(),
     )
   })
@@ -213,7 +215,7 @@ describe('sync', () => {
     const local = ledgerWith([expense('e-1', '2026-10-02', T0)])
     const shared = new InMemoryEndpoint()
     const first = await sync(local, shared)
-    expect(first.pushedFiles).toBe(4) // 1 个月份文件 + 3 个 meta
+    expect(first.pushedFiles).toBe(6) // 1 个月份文件 + 5 个 meta
 
     const month = local.months['2026-10']
     if (!month) throw new Error('2026-10 应存在')
@@ -424,5 +426,69 @@ describe('分类迁移的跨设备传播(评审回归)', () => {
 
     expect(memberB.months['2026-10']?.expenses[0]?.categoryId).toBe(DINNER_CATEGORY)
     expect(memberB.meta.categories.some((c) => c.id === LUNCH_CATEGORY)).toBe(false)
+  })
+})
+
+describe('标签与标签组的合并(ADR-0006)', () => {
+  it('标签双方可写:按 id 并集、updatedAt 后写胜出(成员端 remote-wins 同样生效)', async () => {
+    const local = createEmptyLedger()
+    local.meta.tags = [
+      { id: 'tag-a', name: '甲(本地)', updatedAt: '2026-10-02T09:00:00.000Z' },
+      { id: 'tag-b', name: '乙', updatedAt: '2026-10-01T00:00:00.000Z' },
+    ]
+    const remote = createEmptyLedger()
+    remote.meta.tags = [
+      { id: 'tag-a', name: '甲(远端)', updatedAt: '2026-10-02T08:00:00.000Z' },
+      { id: 'tag-c', name: '丙', updatedAt: '2026-10-01T00:00:00.000Z' },
+    ]
+    const endpoint = new InMemoryEndpoint(ledgerToFiles(remote))
+
+    const result = await sync(local, endpoint, { adminFilesPolicy: 'remote-wins' })
+
+    expect(result.conflictsResolved).toBe(1)
+    expect(local.meta.tags).toEqual([
+      { id: 'tag-a', name: '甲(本地)', updatedAt: '2026-10-02T09:00:00.000Z' },
+      { id: 'tag-b', name: '乙', updatedAt: '2026-10-01T00:00:00.000Z' },
+      { id: 'tag-c', name: '丙', updatedAt: '2026-10-01T00:00:00.000Z' },
+    ])
+    // 合并结果推回端点(标签不随 adminFilesPolicy 走文件级 remote-wins)
+    expect(filesToLedger(await contentsOf(endpoint)).meta.tags).toEqual(local.meta.tags)
+  })
+
+  it('标签组:成员端 remote-wins 采纳管理员的组,不回推本地旧副本', async () => {
+    const local = createEmptyLedger()
+    local.meta.tagGroups = [{ id: 'g-1', name: '本地旧名', color: 'gray', tagIds: [] }]
+    const admin = createEmptyLedger()
+    admin.meta.tagGroups = [
+      { id: 'g-1', name: '管理员命名', color: 'blue', tagIds: [], singleSelect: true },
+      { id: 'g-2', name: '管理员新增', color: 'red', tagIds: [] },
+    ]
+    const endpoint = new InMemoryEndpoint(ledgerToFiles(admin))
+
+    const result = await sync(local, endpoint, { adminFilesPolicy: 'remote-wins' })
+
+    expect(local.meta.tagGroups).toEqual(admin.meta.tagGroups)
+    expect(result.pushedFiles).toBe(0)
+  })
+
+  it('标签组:管理员端 local-wins 保留本地编辑并补入远端新增', async () => {
+    const local = createEmptyLedger()
+    local.meta.tagGroups = [{ id: 'g-1', name: '本地旧名', color: 'gray', tagIds: [] }]
+    const remote = createEmptyLedger()
+    remote.meta.tagGroups = [
+      { id: 'g-1', name: '远端的名', color: 'blue', tagIds: [] },
+      { id: 'g-2', name: '远端新增', color: 'red', tagIds: [] },
+    ]
+    const endpoint = new InMemoryEndpoint(ledgerToFiles(remote))
+
+    const result = await sync(local, endpoint)
+
+    expect(local.meta.tagGroups).toEqual([
+      { id: 'g-1', name: '本地旧名', color: 'gray', tagIds: [] },
+      { id: 'g-2', name: '远端新增', color: 'red', tagIds: [] },
+    ])
+    const pushed = filesToLedger(await contentsOf(endpoint)).meta.tagGroups
+    expect(pushed.find((g) => g.id === 'g-1')?.name).toBe('本地旧名')
+    expect(result.pushedFiles).toBeGreaterThan(0)
   })
 })

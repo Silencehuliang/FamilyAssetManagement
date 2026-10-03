@@ -56,6 +56,14 @@ function categoryNamesOf(category: Category | undefined, byId: Map<string, Categ
 }
 
 /**
+ * 兼容读取废弃的 v1 自由标签文本:新模型下记录只有 tagIds,标签筛选/回填
+ * 待标签体系 UI(V6/V7)接入后改走标签实体;此处缺失即视为空。
+ */
+function legacyTagNames(expense: Expense): string[] {
+  return Array.isArray(expense.tagNames) ? expense.tagNames : []
+}
+
+/**
  * 组合筛选:分类(父/子)、成员、标签、关键词,彼此为「与」关系。
  * 关键词命中备注、分类名(含父分类)或任一标签的子串(忽略大小写)。
  */
@@ -73,12 +81,13 @@ export function filterExpenses(
       if (category?.parentId !== filters.parentId) return false
     }
     if (filters.memberId !== '' && expense.memberId !== filters.memberId) return false
-    if (filters.tag !== '' && !expense.tagNames.includes(filters.tag)) return false
+    const tagNames = legacyTagNames(expense)
+    if (filters.tag !== '' && !tagNames.includes(filters.tag)) return false
     if (keyword !== '') {
       const haystack = [
         expense.note ?? '',
         ...categoryNamesOf(byId.get(expense.categoryId), byId),
-        ...expense.tagNames,
+        ...tagNames,
       ]
         .join('\n')
         .toLowerCase()
@@ -88,18 +97,24 @@ export function filterExpenses(
   })
 }
 
+/**
+ * 明细列表条目视图:`tagNames` 为迁移前兼容字段(缺失时补空数组),仅供旧版
+ * 明细页渲染标签使用;标签体系 UI(V6/V7)改用 tagIds/标签实体后应删除本别名。
+ */
+export type EntryView = Expense & { tagNames: string[] }
+
 export interface DayGroupEntries {
   date: DateKey
   totalCents: number
-  expenses: Expense[]
+  expenses: EntryView[]
 }
 
 /** 按日倒序分组;组内按记录时间倒序、id 兜底,保证展示与测试稳定 */
 export function groupByDay(expenses: Expense[]): DayGroupEntries[] {
-  const buckets = new Map<DateKey, Expense[]>()
+  const buckets = new Map<DateKey, EntryView[]>()
   for (const expense of expenses) {
     const bucket = buckets.get(expense.date) ?? []
-    bucket.push(expense)
+    bucket.push({ ...expense, tagNames: legacyTagNames(expense) })
     buckets.set(expense.date, bucket)
   }
   const groups: DayGroupEntries[] = []
@@ -132,11 +147,11 @@ export function sumCents(expenses: Expense[]): number {
   return total
 }
 
-/** 该月出现过的全部标签,去重升序;供标签筛选下拉 */
+/** 该月出现过的全部标签,去重升序;供标签筛选下拉(兼容读取 tagNames) */
 export function tagsOfMonth(ledger: LedgerData, month: MonthKey): string[] {
   const tags = new Set<string>()
   for (const expense of ledger.months[month]?.expenses ?? []) {
-    for (const tag of expense.tagNames) tags.add(tag)
+    for (const tag of legacyTagNames(expense)) tags.add(tag)
   }
   return [...tags].sort((a, b) => TAG_COLLATOR.compare(a, b))
 }
@@ -207,7 +222,7 @@ export function expenseToForm(ledger: LedgerData, expense: Expense): EntryForm {
     categoryId: expense.categoryId,
     date: expense.date,
     note: expense.note ?? '',
-    tagsText: expense.tagNames.join(', '),
+    tagsText: legacyTagNames(expense).join(', '),
     memberId: expense.memberId,
   }
 }

@@ -16,6 +16,8 @@ import {
   monthFilePath,
   parseMonthFilePath,
   RECURRING_FILE,
+  TAG_GROUPS_FILE,
+  TAGS_FILE,
 } from './files'
 
 const MEMBER = {
@@ -33,7 +35,7 @@ function expense(overrides: Partial<Expense> = {}): Expense {
     amountCents: 2500,
     date: '2026-10-02',
     categoryId: 'cat-dining-2',
-    tagNames: ['微信'],
+    tagIds: ['tag-wx'],
     memberId: 'm-1',
     recordedBy: 'm-1',
     createdAt: '2026-10-02T08:00:00.000Z',
@@ -49,6 +51,17 @@ function contentLedger(): LedgerData {
       categories: [
         { id: 'c-1', name: '餐饮', sortOrder: 1 },
         { id: 'c-2', name: '午餐', parentId: 'c-1', sortOrder: 1 },
+      ],
+      tags: [{ id: 'tag-wx', name: '微信', updatedAt: '2026-10-01T00:00:00.000Z' }],
+      tagGroups: [
+        {
+          id: 'grp-1',
+          name: '支付方式',
+          color: 'blue',
+          tagIds: ['tag-wx'],
+          singleSelect: true,
+          required: true,
+        },
       ],
       budgets: { '2026-10': { totalCents: 300000, categoryCents: { 'c-2': 100000 } } },
       recurring: [
@@ -74,13 +87,15 @@ function contentLedger(): LedgerData {
 }
 
 describe('ledgerToFiles', () => {
-  it('空账本恰好产生 3 个 meta 文件(members.json 不属同步范围),无月份文件,内容为空集合', () => {
+  it('空账本恰好产生 5 个 meta 文件(members.json 不属同步范围),无月份文件,内容为空集合', () => {
     const files = ledgerToFiles(createEmptyLedger())
     expect(Object.keys(files).sort()).toEqual(
-      [CATEGORIES_FILE, BUDGETS_FILE, RECURRING_FILE].sort(),
+      [CATEGORIES_FILE, TAGS_FILE, TAG_GROUPS_FILE, BUDGETS_FILE, RECURRING_FILE].sort(),
     )
     expect(files['ledger/meta/members.json']).toBeUndefined()
     expect(files[CATEGORIES_FILE]).toBe('{\n  "categories": []\n}\n')
+    expect(files[TAGS_FILE]).toBe('{\n  "tags": []\n}\n')
+    expect(files[TAG_GROUPS_FILE]).toBe('{\n  "groups": []\n}\n')
     expect(files[BUDGETS_FILE]).toBe('{\n  "budgets": {}\n}\n')
     expect(files[RECURRING_FILE]).toBe('{\n  "recurring": []\n}\n')
   })
@@ -92,6 +107,8 @@ describe('ledgerToFiles', () => {
         monthFilePath('2026-09'),
         monthFilePath('2026-10'),
         CATEGORIES_FILE,
+        TAGS_FILE,
+        TAG_GROUPS_FILE,
         BUDGETS_FILE,
         RECURRING_FILE,
       ].sort(),
@@ -107,7 +124,7 @@ describe('ledgerToFiles', () => {
     ledger.months['2026-11'] = { expenses: [] }
     const files = ledgerToFiles(ledger)
     expect(files[monthFilePath('2026-11')]).toBeUndefined()
-    expect(Object.keys(files)).toHaveLength(3)
+    expect(Object.keys(files)).toHaveLength(5)
   })
 })
 
@@ -122,6 +139,28 @@ describe('filesToLedger', () => {
   it('宽容:缺失 meta 文件视为空集合,不认识的路径忽略', () => {
     expect(filesToLedger({})).toEqual(createEmptyLedger())
     expect(filesToLedger({ 'README.md': '# 说明' })).toEqual(createEmptyLedger())
+  })
+
+  it('宽容:tags/tagGroups 形状不对按空集合;旧记录 tagNames 原样保留供迁移', () => {
+    const legacy = {
+      id: 'e-legacy',
+      amountCents: 900,
+      date: '2026-10-01',
+      categoryId: 'cat-dining-2',
+      tagNames: ['微信'],
+      memberId: 'm-1',
+      recordedBy: 'm-1',
+      createdAt: '2026-10-01T00:00:00.000Z',
+      updatedAt: '2026-10-01T00:00:00.000Z',
+    }
+    const ledger = filesToLedger({
+      [TAGS_FILE]: '{"tags": "not-an-array"}\n',
+      [TAG_GROUPS_FILE]: '[]\n',
+      [monthFilePath('2026-10')]: JSON.stringify({ expenses: [legacy] }),
+    })
+    expect(ledger.meta.tags).toEqual([])
+    expect(ledger.meta.tagGroups).toEqual([])
+    expect(ledger.months['2026-10']?.expenses[0]?.tagNames).toEqual(['微信'])
   })
 
   it('宽容:months 目录下非 YYYY-MM 命名忽略,空支出月份文件不建月份条目', () => {
@@ -144,6 +183,8 @@ describe('路径工具', () => {
     expect(parseMonthFilePath('ledger/meta/members.json')).toBeUndefined()
     expect(isLedgerFilePath(monthFilePath('2026-10'))).toBe(true)
     expect(isLedgerFilePath(RECURRING_FILE)).toBe(true)
+    expect(isLedgerFilePath(TAGS_FILE)).toBe(true)
+    expect(isLedgerFilePath(TAG_GROUPS_FILE)).toBe(true)
     expect(isLedgerFilePath('ledger/months/notes.json')).toBe(false)
     expect(isLedgerFilePath('README.md')).toBe(false)
   })
