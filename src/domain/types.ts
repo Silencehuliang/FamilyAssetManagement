@@ -27,6 +27,8 @@ export interface Category {
   /** 子分类持有父分类 id;父分类无此字段 */
   parentId?: CategoryId
   sortOrder: number
+  /** 父分类色系(7 色调色板);子分类继承父分类颜色,不单独保存 */
+  color?: TagColor
 }
 
 export interface Expense {

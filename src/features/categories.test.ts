@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { addCategory, addExpense, deleteCategory } from '../domain'
+import { addCategory, addExpense, deleteCategory, reorderCategories } from '../domain'
 import { ADMIN, fixtureLedger, LUNCH_CATEGORY, XIAOHONG } from '../domain/fixtures'
 import {
   canManageCategories,
+  categoryColor,
   categoryInUse,
   categoryTree,
   countExpensesInCategory,
@@ -82,5 +83,33 @@ describe('canManageCategories(管理员门禁)', () => {
     expect(canManageCategories(ADMIN)).toBe(true)
     expect(canManageCategories(XIAOHONG)).toBe(false)
     expect(canManageCategories(null)).toBe(false)
+  })
+})
+
+describe('categoryColor(分类取色与继承,V8)', () => {
+  it('父分类自选色 → --tag-* 令牌;子分类继承父分类色', () => {
+    const ledger = fixtureLedger()
+    addCategory(ledger, ADMIN, { id: 'cat-coffee', name: '咖啡', color: 'purple' })
+
+    expect(categoryColor(ledger, 'cat-coffee')).toBe('var(--tag-purple)')
+    // 子分类不单独存色,读取时解析到父分类
+    addCategory(ledger, ADMIN, { id: 'cat-coffee-1', name: '咖啡豆', parentId: 'cat-coffee' })
+    expect(categoryColor(ledger, 'cat-coffee-1')).toBe('var(--tag-purple)')
+  })
+
+  it('未选色回退到父分类序号对应的 chart 色板(确定性),排序变化后跟着变', () => {
+    const ledger = fixtureLedger()
+    expect(categoryColor(ledger, LUNCH_CATEGORY)).toBe('var(--chart-1)') // 餐饮序号 0
+    expect(categoryColor(ledger, 'cat-housing-1')).toBe('var(--chart-4)') // 居住序号 3
+
+    const ids = ledger.meta.categories.filter((c) => c.parentId === undefined).map((c) => c.id)
+    const moved = [ids[3], ...ids.filter((_, index) => index !== 3)] as string[]
+    reorderCategories(ledger, ADMIN, null, moved)
+    expect(categoryColor(ledger, 'cat-housing-1')).toBe('var(--chart-1)')
+    expect(categoryColor(ledger, LUNCH_CATEGORY)).toBe('var(--chart-2)')
+  })
+
+  it('未知分类回退 gray', () => {
+    expect(categoryColor(fixtureLedger(), 'cat-missing')).toBe('var(--tag-gray)')
   })
 })

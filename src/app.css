@@ -494,7 +494,72 @@
   }
 
   .category-child-row {
-    @apply flex items-center justify-between gap-2 border-t border-border py-2 text-sm;
+    @apply flex flex-wrap items-center gap-2 border-t border-border py-2 text-sm;
+  }
+
+  /* 分类管理(V8):就地编辑、拖拽把手与配色 */
+  .category-card {
+    @apply relative;
+  }
+
+  .category-dragging {
+    @apply relative z-10 opacity-70;
+  }
+
+  .drag-handle {
+    @apply -ml-1 flex size-8 shrink-0 touch-none items-center justify-center rounded-md border-0 bg-transparent p-0 text-muted-foreground;
+  }
+
+  .category-inline-row {
+    @apply mt-2.5 border-t border-border pt-2;
+  }
+
+  .category-notice {
+    @apply mb-0 w-full;
+  }
+
+  .category-migrate {
+    @apply w-full;
+  }
+
+  .category-migrate-controls {
+    @apply mt-2 flex flex-wrap items-center gap-2.5;
+  }
+
+  .category-migrate-controls select {
+    @apply rounded-md border border-input bg-background px-2.5 py-1.5 text-[13px] text-foreground;
+  }
+
+  .color-swatch {
+    @apply size-6 shrink-0 rounded-full border-2 border-background p-0 ring-1 ring-border;
+  }
+
+  .color-palette {
+    @apply absolute top-8 left-0 z-30 flex gap-1.5 rounded-lg border border-border bg-card p-2 shadow-lg;
+  }
+
+  .color-option {
+    @apply size-6 rounded-full border-2 border-transparent p-0;
+  }
+
+  .color-option-active {
+    @apply border-foreground;
+  }
+
+  .inline-edit {
+    @apply flex w-full items-center gap-2;
+  }
+
+  .inline-edit-input {
+    @apply box-border w-full min-w-0 flex-1 rounded-md border border-input bg-background px-3 py-2 text-[15px] text-foreground;
+  }
+
+  .inline-edit-input-compact {
+    @apply px-2.5 py-1.5 text-[13px];
+  }
+
+  .inline-edit-input:focus {
+    @apply border-ring outline-none ring-2 ring-ring/30;
   }
 
   /* 统计页:手写 SVG 图表保留,色板走令牌 */

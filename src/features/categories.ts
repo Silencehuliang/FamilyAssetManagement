@@ -1,8 +1,8 @@
 /**
- * 分类管理页的纯逻辑(T8):两级树、排序位次、使用量统计与管理员门禁。
- * 领域层(categories.ts)负责增删改与迁移规则,这里只做界面展示所需的无副作用计算。
+ * 分类管理页的纯逻辑(T8/V8):两级树、排序位次、使用量统计、颜色解析与管理员门禁。
+ * 领域层(categories.ts)负责增删改与迁移/排序规则,这里只做界面展示所需的无副作用计算。
  */
-import type { Category, CategoryId, LedgerData, Member } from '../domain'
+import type { Category, CategoryId, LedgerData, Member, TagColor } from '../domain'
 import { childrenOf, isChild, parentCategories } from '../domain'
 
 export interface CategoryTreeNode {
@@ -16,6 +16,40 @@ export function categoryTree(ledger: LedgerData): CategoryTreeNode[] {
     parent,
     children: childrenOf(ledger, parent.id),
   }))
+}
+
+/** 分类颜色令牌:7 色与标签组共用同一词汇(ADR-0006) */
+export const CATEGORY_COLOR_VARS: Record<TagColor, string> = {
+  red: 'var(--tag-red)',
+  orange: 'var(--tag-orange)',
+  yellow: 'var(--tag-yellow)',
+  green: 'var(--tag-green)',
+  blue: 'var(--tag-blue)',
+  purple: 'var(--tag-purple)',
+  gray: 'var(--tag-gray)',
+}
+
+/** 分类所属的父分类(父分类返回自身;未知 id 返回 undefined) */
+export function categoryParent(ledger: LedgerData, categoryId: CategoryId): Category | undefined {
+  const category = ledger.meta.categories.find((c) => c.id === categoryId)
+  if (!category) return undefined
+  if (category.parentId === undefined) return category
+  return ledger.meta.categories.find((c) => c.id === category.parentId)
+}
+
+/**
+ * 分类色(V8,供管理页/明细/首页/图表统一取色):
+ * 1. 父分类选了 7 色之一 → 对应 --tag-* 令牌(子分类继承父分类色);
+ * 2. 未选色 → 按父分类在 sortOrder 中的序号取 chart 色板(确定性回退,与原 categoryAccent 一致);
+ * 3. 未知分类 → gray。
+ */
+export function categoryColor(ledger: LedgerData, categoryId: CategoryId): string {
+  const parent = categoryParent(ledger, categoryId)
+  if (!parent) return 'var(--tag-gray)'
+  if (parent.color !== undefined) return CATEGORY_COLOR_VARS[parent.color]
+  const index = parentCategories(ledger).findIndex((c) => c.id === parent.id)
+  if (index < 0) return 'var(--tag-gray)'
+  return `var(--chart-${(index % 8) + 1})`
 }
 
 /** 下一个排序位次:同级最大 sortOrder + 1(空集合从 0 开始) */

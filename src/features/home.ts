@@ -5,7 +5,6 @@
 import {
   aggregateMonth,
   budgetProgress,
-  type CategoryId,
   type DateKey,
   type LedgerData,
   type MonthKey,
@@ -122,18 +121,6 @@ function previousDay(date: DateKey): DateKey {
   const month = String(parsed.getMonth() + 1).padStart(2, '0')
   const day = String(parsed.getDate()).padStart(2, '0')
   return `${parsed.getFullYear()}-${month}-${day}`
-}
-
-/** 分类色块:父分类按 sortOrder 序号取 chart 色板(确定性);未知分类回退 gray */
-export function categoryAccent(ledger: LedgerData, categoryId: CategoryId): string {
-  const category = ledger.meta.categories.find((item) => item.id === categoryId)
-  const parentId = category?.parentId ?? categoryId
-  const parents = ledger.meta.categories
-    .filter((item) => item.parentId === undefined)
-    .sort((a, b) => a.sortOrder - b.sortOrder || (a.id < b.id ? -1 : 1))
-  const index = parents.findIndex((item) => item.id === parentId)
-  if (index < 0) return 'var(--tag-gray)'
-  return `var(--chart-${(index % 8) + 1})`
 }
 
 /** 迷你环形图数据:本月父分类占比(长尾归并为「其他」) */

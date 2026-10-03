@@ -49,7 +49,7 @@ function contentLedger(): LedgerData {
     meta: {
       members: [MEMBER],
       categories: [
-        { id: 'c-1', name: '餐饮', sortOrder: 1 },
+        { id: 'c-1', name: '餐饮', sortOrder: 1, color: 'orange' },
         { id: 'c-2', name: '午餐', parentId: 'c-1', sortOrder: 1 },
       ],
       tags: [{ id: 'tag-wx', name: '微信', updatedAt: '2026-10-01T00:00:00.000Z' }],

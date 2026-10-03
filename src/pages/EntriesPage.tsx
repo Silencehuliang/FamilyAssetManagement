@@ -4,6 +4,7 @@ import MdiChevronRight from '~icons/mdi/chevron-right'
 import { useDialog } from '../components/dialog'
 import { EditExpenseDialog } from '../components/EditExpenseDialog'
 import type { Expense } from '../domain'
+import { categoryColor } from '../features/categories'
 import {
   canEditEntry,
   EMPTY_FILTERS,
@@ -242,7 +243,12 @@ export function EntriesPage({ controller, state }: { controller: AppController; 
                       title={editable ? '点击编辑' : '只能编辑自己记录的支出'}
                       onClick={() => openEdit(expense)}
                     >
-                      <span className="entry-category">
+                      <span className="entry-category inline-flex items-center gap-1.5">
+                        <span
+                          className="size-2.5 shrink-0 rounded-full"
+                          style={{ background: categoryColor(ledger, expense.categoryId) }}
+                          aria-hidden="true"
+                        />
                         {resolveCategoryPath(ledger, expense.categoryId)}
                       </span>
                       <span className="entry-meta">

@@ -4,12 +4,12 @@ import MdiPlus from '~icons/mdi/plus'
 import { AnimatedNumber } from '../components/AnimatedNumber'
 import { useBillEditor } from '../components/editor'
 import type { Expense } from '../domain'
+import { categoryColor } from '../features/categories'
 import { canEditEntry, memberNameOf } from '../features/entries'
 import { formatCents, resolveCategoryName, todayKey } from '../features/entry'
 import {
   activeDotIndex,
   budgetWidget,
-  categoryAccent,
   homeBillGroups,
   homeDayLabel,
   homeDonut,
@@ -228,7 +228,7 @@ export function HomePage({
                       >
                         <span
                           className="size-9 shrink-0 rounded-md"
-                          style={{ background: categoryAccent(ledger, expense.categoryId) }}
+                          style={{ background: categoryColor(ledger, expense.categoryId) }}
                           aria-hidden="true"
                         />
                         <span className="min-w-0 flex-1">
