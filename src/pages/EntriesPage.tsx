@@ -1,8 +1,7 @@
 import { useState } from 'react'
 import MdiChevronLeft from '~icons/mdi/chevron-left'
 import MdiChevronRight from '~icons/mdi/chevron-right'
-import { useDialog } from '../components/dialog'
-import { EditExpenseDialog } from '../components/EditExpenseDialog'
+import { useBillEditor } from '../components/editor'
 import type { Expense } from '../domain'
 import { categoryColor } from '../features/categories'
 import {
@@ -41,7 +40,7 @@ export function EntriesPage({
   const ledger = state.ledger
   const actor = state.member
   const currentMonth = todayKey().slice(0, 7)
-  const { showDialog } = useDialog()
+  const openBillEditor = useBillEditor(controller)
 
   const [month, setMonth] = useState(currentMonth)
   const [filters, setFilters] = useState<EntryFilters>(() => ({ ...EMPTY_FILTERS, ...preset }))
@@ -58,17 +57,8 @@ export function EntriesPage({
 
   const openEdit = (expense: Expense): void => {
     if (!actor || !canEditEntry(actor, expense)) return
-    void showDialog<void>(
-      ({ close }) => (
-        <EditExpenseDialog
-          controller={controller}
-          state={state}
-          expense={expense}
-          onClose={() => close(undefined)}
-        />
-      ),
-      { label: '编辑支出' },
-    )
+    // #29:编辑已有支出复用全屏编辑器(与首页/FAB 同一入口)
+    void openBillEditor({ expense })
   }
 
   /** 切月:标签选项按月生成,切月时清掉已选标签避免悬空 */

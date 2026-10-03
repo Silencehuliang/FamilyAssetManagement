@@ -68,7 +68,6 @@ function Shell({ state }: { state: AppState }) {
   const openBillEditor = useBillEditor(appController)
   /** 统计页下钻跳转明细时携带的筛选预置(V9) */
   const [entryPreset, setEntryPreset] = useState<Partial<EntryFilters> | null>(null)
-  const { showDialog } = useDialog()
 
   const navigate = (next: AppRoute): void => {
     setRoute(next)

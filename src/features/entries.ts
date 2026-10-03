@@ -7,6 +7,7 @@ import {
   canEditExpense,
   type DateKey,
   type Expense,
+  expenseTagIds,
   type LedgerData,
   type Member,
   type MemberId,
@@ -63,7 +64,6 @@ function categoryNamesOf(category: Category | undefined, byId: Map<string, Categ
   if (category.parentId === undefined) return [category.name]
   return [byId.get(category.parentId)?.name ?? '', category.name].filter((name) => name !== '')
 }
-
 
 /**
  * 标签实体 id 解析(筛选路径,V10):只保留存在于账本的实体(悬空引用过滤);
@@ -219,7 +219,6 @@ export function sumCents(expenses: Expense[]): number {
   return total
 }
 
- (fix: address lane B review findings (#30, #31, #32))
 /** 显式中文排序:不带 locale 的 localeCompare 随运行环境默认区域变化(CI Ubuntu 与本地 Windows 排序不一致) */
 const TAG_COLLATOR = new Intl.Collator('zh-Hans-CN')
 

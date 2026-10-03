@@ -16,7 +16,6 @@ import {
   homeSummary,
 } from '../features/home'
 import { type CategorySlice, chartColor } from '../features/stats'
-import { resolveExpenseTagNames } from '../features/tags'
 import type { AppController, AppState } from '../state/app-controller'
 
 const WIDGET_CLASS =
@@ -243,7 +242,6 @@ export function HomePage({
                                 className={`entry-tag ${chip.color ? `entry-tag-${chip.color}` : ''}`}
                               >
                                 #{chip.name}
- (feat: 明细分组标签筛选+行内组色 chips (#32))
                               </span>
                             ))}
                           </span>

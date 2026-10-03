@@ -10,12 +10,15 @@ export function CategoryGrid({
   categories,
   parentId,
   categoryId,
+  colorOf,
   onSelectParent,
   onSelectChild,
 }: {
   categories: Category[]
   parentId: CategoryId
   categoryId: CategoryId
+  /** 分类色(V8):父分类色,子分类继承;缺省不显示色点 */
+  colorOf?: (categoryId: CategoryId) => string
   onSelectParent: (parentId: CategoryId) => void
   onSelectChild: (childId: CategoryId) => void
 }) {
@@ -40,7 +43,16 @@ export function CategoryGrid({
               }`}
               onClick={() => onSelectParent(item.id)}
             >
-              {item.name}
+              <span className="flex items-center justify-center gap-1.5">
+                {colorOf ? (
+                  <span
+                    aria-hidden="true"
+                    className="inline-block size-2 shrink-0 rounded-full"
+                    style={{ background: colorOf(item.id) }}
+                  />
+                ) : null}
+                {item.name}
+              </span>
             </button>
           )
         })}
@@ -60,7 +72,16 @@ export function CategoryGrid({
               }`}
               onClick={() => onSelectChild(item.id)}
             >
-              {item.name}
+              <span className="flex items-center justify-center gap-1.5">
+                {colorOf ? (
+                  <span
+                    aria-hidden="true"
+                    className="inline-block size-1.5 shrink-0 rounded-full opacity-80"
+                    style={{ background: colorOf(item.id) }}
+                  />
+                ) : null}
+                {item.name}
+              </span>
             </button>
           )
         })}
