@@ -47,7 +47,11 @@ export function categoryColor(ledger: LedgerData, categoryId: CategoryId): strin
   const parent = categoryParent(ledger, categoryId)
   if (!parent) return 'var(--tag-gray)'
   if (parent.color !== undefined) return CATEGORY_COLOR_VARS[parent.color]
-  const index = parentCategories(ledger).findIndex((c) => c.id === parent.id)
+  // 回退序号:sortOrder 升序,并列按 id 兜底(与旧 categoryAccent 的确定性一致,
+  // 避免同序分类因数组插入顺序不同而换色)
+  const index = parentCategories(ledger)
+    .sort((a, b) => a.sortOrder - b.sortOrder || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    .findIndex((c) => c.id === parent.id)
   if (index < 0) return 'var(--tag-gray)'
   return `var(--chart-${(index % 8) + 1})`
 }

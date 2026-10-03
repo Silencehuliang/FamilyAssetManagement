@@ -5,6 +5,7 @@
  */
 import {
   aggregateMonth,
+  type Category,
   expenseTagIds,
   type LedgerData,
   type MemberId,
@@ -110,8 +111,21 @@ function compareSlices(
 }
 
 /**
+ * 子分类展示名(父/子):不同父分类下可能有同名子分类,只显示子分类名会让
+ * 环形图分片与图例互相覆盖;父分类缺失时退化为子分类名。
+ */
+function categoryPathName(categoryById: Map<string, Category>, id: string): string {
+  const category = categoryById.get(id)
+  if (!category) return '未分类'
+  if (category.parentId === undefined) return category.name
+  const parent = categoryById.get(category.parentId)
+  return parent ? `${parent.name}/${category.name}` : category.name
+}
+
+/**
  * 分类占比:level='parent' 把子分类金额聚合到父分类,level='child' 按子分类。
  * 金额降序;超过 topN 的尾部合并为「其他」(id 固定为 MERGED_CATEGORY_ID)。
+ * 子级分片用「父/子」全路径名,避免不同父分类下的同名子分类在图表/图例中混淆。
  */
 export function categoryShare(
   ledger: LedgerData,
@@ -135,7 +149,10 @@ export function categoryShare(
 
   const slices = [...totals.entries()].map(([id, totalCents]) => ({
     id,
-    name: categoryById.get(id)?.name ?? '未分类',
+    name:
+      level === 'child'
+        ? categoryPathName(categoryById, id)
+        : (categoryById.get(id)?.name ?? '未分类'),
     totalCents,
   }))
   slices.sort(compareSlices)

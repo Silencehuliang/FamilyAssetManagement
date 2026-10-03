@@ -19,13 +19,11 @@ import {
   formatMonthLabel,
   groupByDay,
   hasActiveFilters,
-  hasTagFilter,
   monthOptions,
   shiftMonth,
   sumCents,
   tagChipsOf,
   tagFilterGroups,
-  tagsOfMonth,
   UNGROUPED_FILTER_GROUP_ID,
 } from './entries'
 
@@ -95,7 +93,6 @@ describe('filterExpenses(组合筛选)', () => {
     expect(hasActiveFilters(EMPTY_FILTERS)).toBe(false)
     expect(hasActiveFilters(filters({ keyword: '  ' }))).toBe(false)
     expect(hasActiveFilters(filters({ tagIds: [TAG_WECHAT] }))).toBe(true)
-    expect(hasTagFilter(filters({ tagMode: 'exclude' }))).toBe(false)
   })
 
   it('按子分类精确筛选;按父分类匹配其全部子分类', () => {
@@ -248,6 +245,34 @@ describe('tagFilterGroups(按组筛选选项,V10)', () => {
     ])
     expect(tagFilterGroups(fixtureLedger(), '2026-10')).toEqual([])
   })
+
+  it('presetTagIds 即使当月无支出也保留为选项,跳转预置的 chip 不消失', () => {
+    const ledger = ledgerWith([
+      { amountCents: 200, date: '2026-09-03', categoryId: DINNER_CATEGORY, tagNames: ['微信'] },
+    ])
+    ledger.meta.tags = [
+      { id: TAG_WECHAT, name: '微信', updatedAt: NOW },
+      { id: TAG_CASH, name: '现金', updatedAt: NOW },
+      { id: TAG_DAILY, name: '日用', updatedAt: NOW },
+    ]
+    ledger.meta.tagGroups = [
+      { id: 'grp-pay', name: '支付方式', color: 'blue', tagIds: [TAG_WECHAT, TAG_CASH] },
+    ]
+
+    // 2026-10 无任何支出:预置的微信/日用仍以实体名出现在各自分组里
+    expect(tagFilterGroups(ledger, '2026-10', [TAG_WECHAT, TAG_DAILY])).toEqual([
+      {
+        id: 'grp-pay',
+        name: '支付方式',
+        color: 'blue',
+        tags: [{ id: TAG_WECHAT, name: '微信' }],
+      },
+      { id: UNGROUPED_FILTER_GROUP_ID, name: '未分组', tags: [{ id: TAG_DAILY, name: '日用' }] },
+    ])
+    // 不预置时保持原行为(空月为空);悬空预置 id 忽略,不产生空组
+    expect(tagFilterGroups(ledger, '2026-10')).toEqual([])
+    expect(tagFilterGroups(ledger, '2026-10', ['tag-missing'])).toEqual([])
+  })
 })
 
 describe('tagChipsOf / EntryView.tagChips(行内标签组色,V10)', () => {
@@ -354,22 +379,6 @@ describe('月份选项与切换', () => {
     expect(shiftMonth('2026-12', 1)).toBe('2027-01')
     expect(formatMonthLabel('2026-10')).toBe('2026年10月')
     expect(formatMonthLabel('2026-01')).toBe('2026年1月')
-  })
-
-  it('tagsOfMonth 返回该月出现过的去重标签', () => {
-    const ledger = ledgerWith([
-      {
-        amountCents: 100,
-        date: '2026-10-02',
-        categoryId: LUNCH_CATEGORY,
-        tagNames: ['微信', '日用'],
-      },
-      { amountCents: 100, date: '2026-10-03', categoryId: DINNER_CATEGORY, tagNames: ['微信'] },
-      { amountCents: 100, date: '2026-09-03', categoryId: DINNER_CATEGORY, tagNames: ['现金'] },
-    ])
-    expect(tagsOfMonth(ledger, '2026-10')).toEqual(['日用', '微信'])
-    expect(tagsOfMonth(ledger, '2026-09')).toEqual(['现金'])
-    expect(tagsOfMonth(ledger, '2026-08')).toEqual([])
   })
 })
 
@@ -479,7 +488,6 @@ describe('标签实体解析(读路径,评审修复)', () => {
     ])
     expect(filterExpenses(ledger, all, filters({ tagIds: ['tag-missing'] }))).toHaveLength(0)
     expect(filterExpenses(ledger, all, filters({ keyword: '现金' }))).toHaveLength(0)
-    expect(tagsOfMonth(ledger, '2026-10')).toEqual(['微信'])
     expect(expenseToForm(ledger, tagged).tagsText).toBe('微信')
     expect(groupByDay(ledger, all)[0]?.expenses[0]?.tagNames).toEqual(['微信'])
     expect(groupByDay(ledger, all)[0]?.expenses[0]?.tagChips).toEqual([

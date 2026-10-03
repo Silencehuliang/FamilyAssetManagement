@@ -54,11 +54,6 @@ export function hasActiveFilters(filters: EntryFilters): boolean {
   )
 }
 
-/** 标签筛选是否参与(空选择时 include/exclude 都视为不限) */
-export function hasTagFilter(filters: EntryFilters): boolean {
-  return filters.tagIds.length > 0
-}
-
 function categoryById(ledger: LedgerData): Map<string, Category> {
   return new Map(ledger.meta.categories.map((c) => [c.id, c]))
 }
@@ -224,15 +219,7 @@ export function sumCents(expenses: Expense[]): number {
   return total
 }
 
-/** 该月出现过的全部标签名字,去重升序;由 tagIds 经实体解析(旧字段兜底) */
-export function tagsOfMonth(ledger: LedgerData, month: MonthKey): string[] {
-  const tags = new Set<string>()
-  for (const expense of ledger.months[month]?.expenses ?? []) {
-    for (const tag of resolveExpenseTagNames(ledger, expense)) tags.add(tag)
-  }
-  return [...tags].sort((a, b) => TAG_COLLATOR.compare(a, b))
-}
-
+ (fix: address lane B review findings (#30, #31, #32))
 /** 显式中文排序:不带 locale 的 localeCompare 随运行环境默认区域变化(CI Ubuntu 与本地 Windows 排序不一致) */
 const TAG_COLLATOR = new Intl.Collator('zh-Hans-CN')
 
@@ -250,11 +237,20 @@ export interface TagFilterGroup {
 /**
  * 按标签组分组的筛选选项(V10):只列所选月份实际出现过的标签实体;
  * 未归组的标签合成「未分组」组(按名称中文排序);悬空引用忽略。
+ * presetTagIds(统计页跳转预置的标签)即使当月没有支出也保留为选项,
+ * 保证跳转后选中的 chip 不会消失;未知 id 静默忽略。
  */
-export function tagFilterGroups(ledger: LedgerData, month: MonthKey): TagFilterGroup[] {
+export function tagFilterGroups(
+  ledger: LedgerData,
+  month: MonthKey,
+  presetTagIds: readonly TagId[] = [],
+): TagFilterGroup[] {
   const used = new Set<TagId>()
   for (const expense of ledger.months[month]?.expenses ?? []) {
     for (const id of resolvedTagIdsOf(ledger, expense)) used.add(id)
+  }
+  for (const id of presetTagIds) {
+    if (ledger.meta.tags.some((tag) => tag.id === id)) used.add(id)
   }
   if (used.size === 0) return []
 

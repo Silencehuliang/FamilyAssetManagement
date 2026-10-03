@@ -50,7 +50,7 @@ export function EntriesPage({
   const visible = filterExpenses(ledger, monthExpenses, filters)
   const groups = groupByDay(ledger, visible)
   const options = monthOptions(ledger, month, currentMonth)
-  const filterTagGroups = tagFilterGroups(ledger, month)
+  const filterTagGroups = tagFilterGroups(ledger, month, preset?.tagIds ?? [])
   const { parents, childrenByParent } = groupCategories(ledger.meta.categories)
   const children = filters.parentId ? (childrenByParent[filters.parentId] ?? []) : []
   const filtering = hasActiveFilters(filters)

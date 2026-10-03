@@ -130,6 +130,37 @@ describe('分类颜色(V8,仅管理员)', () => {
     ).toThrowError(/不支持/)
     expect(ledger.meta.categories.find((c) => c.id === 'cat-dining')?.color).toBeUndefined()
   })
+
+  it('子分类不允许带色(color_parent_only),父分类色不受影响', () => {
+    const ledger = fixtureLedger()
+
+    let addCode: string | undefined
+    try {
+      addCategory(ledger, ADMIN, {
+        id: 'cat-child-color',
+        name: '子色',
+        parentId: 'cat-dining',
+        color: 'red',
+      })
+    } catch (error) {
+      addCode = error instanceof DomainError ? error.code : undefined
+    }
+    expect(addCode).toBe('color_parent_only')
+    expect(ledger.meta.categories.some((c) => c.id === 'cat-child-color')).toBe(false)
+
+    // 父分类仍可正常设色
+    updateCategory(ledger, ADMIN, 'cat-dining', { color: 'blue' })
+    expect(ledger.meta.categories.find((c) => c.id === 'cat-dining')?.color).toBe('blue')
+
+    let updateCode: string | undefined
+    try {
+      updateCategory(ledger, ADMIN, LUNCH_CATEGORY, { color: 'red' })
+    } catch (error) {
+      updateCode = error instanceof DomainError ? error.code : undefined
+    }
+    expect(updateCode).toBe('color_parent_only')
+    expect(ledger.meta.categories.find((c) => c.id === LUNCH_CATEGORY)?.color).toBeUndefined()
+  })
 })
 
 describe('reorderCategories(拖拽排序,仅管理员)', () => {

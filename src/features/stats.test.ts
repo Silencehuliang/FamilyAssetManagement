@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { addExpense, type LedgerData, type TagGroup, type TagId, tagIdFromName } from '../domain'
+import {
+  addCategory,
+  addExpense,
+  type LedgerData,
+  type TagGroup,
+  type TagId,
+  tagIdFromName,
+} from '../domain'
 import {
   ADMIN,
   DINNER_CATEGORY,
@@ -94,7 +101,7 @@ describe('categoryShare', () => {
     ])
   })
 
-  it('子级视图按子分类展示,父分类不参与', () => {
+  it('子级视图按子分类展示,父分类不参与;分片名用「父/子」全路径', () => {
     const slices = categoryShare(seeded(), ['2026-10'], 'child')
 
     expect(slices.map((slice) => slice.id)).toEqual([
@@ -102,7 +109,21 @@ describe('categoryShare', () => {
       'cat-transport-2',
       'cat-dining-3',
     ])
-    expect(slices[0]).toMatchObject({ name: '午餐', totalCents: 3000 })
+    expect(slices[0]).toMatchObject({ name: '餐饮/午餐', totalCents: 3000 })
+  })
+
+  it('不同父分类下的同名子分类用全路径区分,图例/图表不互相覆盖', () => {
+    const ledger = fixtureLedger()
+    addCategory(ledger, ADMIN, { id: 'cat-dining-6', name: '咖啡', parentId: 'cat-dining' })
+    addCategory(ledger, ADMIN, { id: 'cat-fun-4', name: '咖啡', parentId: 'cat-fun' })
+    add(ledger, 3000, '2026-10-01', 'cat-dining-6')
+    add(ledger, 1000, '2026-10-02', 'cat-fun-4')
+
+    const slices = categoryShare(ledger, ['2026-10'], 'child')
+
+    expect(slices.map((slice) => slice.id)).toEqual(['cat-dining-6', 'cat-fun-4'])
+    expect(slices.map((slice) => slice.name)).toEqual(['餐饮/咖啡', '娱乐/咖啡'])
+    expect(new Set(slices.map((slice) => slice.name)).size).toBe(slices.length)
   })
 
   it('超过 topN 的尾部合并为「其他」,percent 仍按全量计算', () => {

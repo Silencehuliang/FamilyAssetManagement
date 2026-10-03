@@ -109,6 +109,29 @@ describe('categoryColor(分类取色与继承,V8)', () => {
     expect(categoryColor(ledger, LUNCH_CATEGORY)).toBe('var(--chart-2)')
   })
 
+  it('未选色回退时 sortOrder 并列按 id 兜底,不随数组插入顺序抖动', () => {
+    const ledger = fixtureLedger()
+    ledger.meta.categories = [
+      { id: 'z', name: '乙', sortOrder: 0 },
+      { id: 'a', name: '甲', sortOrder: 0 },
+      { id: 'b', name: '丙', sortOrder: 1 },
+    ]
+
+    expect(categoryColor(ledger, 'a')).toBe('var(--chart-1)')
+    expect(categoryColor(ledger, 'z')).toBe('var(--chart-2)')
+    expect(categoryColor(ledger, 'b')).toBe('var(--chart-3)')
+
+    // 交换插入顺序,取色结果不变(确定性回退)
+    ledger.meta.categories = [
+      { id: 'b', name: '丙', sortOrder: 1 },
+      { id: 'a', name: '甲', sortOrder: 0 },
+      { id: 'z', name: '乙', sortOrder: 0 },
+    ]
+    expect(categoryColor(ledger, 'a')).toBe('var(--chart-1)')
+    expect(categoryColor(ledger, 'z')).toBe('var(--chart-2)')
+    expect(categoryColor(ledger, 'b')).toBe('var(--chart-3)')
+  })
+
   it('未知分类回退 gray', () => {
     expect(categoryColor(fixtureLedger(), 'cat-missing')).toBe('var(--tag-gray)')
   })

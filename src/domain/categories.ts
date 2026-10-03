@@ -36,9 +36,17 @@ function validatedColor(color: TagColor | undefined): TagColor | undefined {
   return color
 }
 
+/** 颜色归属校验:颜色只能设置在父分类上(子分类继承父分类色) */
+function requireParentOnlyColor(isChildCategory: boolean, color: TagColor | undefined): void {
+  if (isChildCategory && color !== undefined) {
+    throw new DomainError('color_parent_only', '颜色只能设置在父分类上')
+  }
+}
+
 export function addCategory(ledger: LedgerData, actor: Member, input: CategoryInput): LedgerData {
   requireAdmin(actor)
   if (input.parentId !== undefined) findCategory(ledger, input.parentId)
+  requireParentOnlyColor(input.parentId !== undefined, input.color)
   if (ledger.meta.categories.some((c) => c.name === input.name && c.parentId === input.parentId)) {
     throw new DomainError('category_duplicated', `同级下已存在同名分类:${input.name}`)
   }
@@ -61,6 +69,7 @@ export function updateCategory(
 ): LedgerData {
   requireAdmin(actor)
   const category = findCategory(ledger, id)
+  requireParentOnlyColor(isChild(category), patch.color)
   if (
     patch.name !== undefined &&
     ledger.meta.categories.some(
