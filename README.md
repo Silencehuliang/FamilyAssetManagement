@@ -47,6 +47,12 @@ pnpm typecheck  # TypeScript
   - `GITHUB_REPO`:账本仓库,格式 `owner/repo`
   - `JWT_SECRET`:会话签名密钥
 
+## 版本与发布
+
+- 版本封顶时:在最后一个功能提交上打**注解 tag**(`vX.Y.Z`)并发布 GitHub Release(标题 `家庭记账 vX.Y.Z`,说明含功能清单/部署地址/测试与验收结论)
+- 当前版本:[v1.0.0](https://github.com/Silencehuliang/FamilyAssetManagement/releases/tag/v1.0.0)(封顶提交 `00fb10e`);v1.1 开发中([spec #22](https://github.com/Silencehuliang/FamilyAssetManagement/issues/22))
+- 生产部署始终跟随 main 最新构建;Release 只标记版本节点,不含二进制产物
+
 ## 状态
 
-✅ v1 完成:全部功能已上线并通过真实环境端到端验收(初始化向导 → 记账 → GitHub 仓库落 JSON → 跨端同步)。工单见 [Issues](https://github.com/Silencehuliang/FamilyAssetManagement/issues)。
+✅ v1.0.0 已发布:全部功能上线并通过真实环境端到端验收(初始化向导 → 记账 → GitHub 仓库落 JSON → 跨端同步)。工单见 [Issues](https://github.com/Silencehuliang/FamilyAssetManagement/issues)。
