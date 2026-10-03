@@ -11,6 +11,7 @@ import {
   nextId,
   XIAOHONG,
 } from './fixtures'
+import { upsertTagsByName } from './tags'
 import { DomainError } from './types'
 
 function ctx(actor = XIAOHONG, now = NOW) {
@@ -88,6 +89,58 @@ describe('addExpense', () => {
         ctx(LAOSAN),
       ),
     ).toThrowError(/停用/)
+  })
+})
+
+describe('标签实体校验(评审修复)', () => {
+  it('addExpense:tagIds 指向不存在实体时抛 unknown_tag,实体存在则接受', async () => {
+    const ledger = fixtureLedger()
+    const [wechat] = await upsertTagsByName(ledger, ['微信'], NOW)
+    if (!wechat) throw new Error('fixture: 标签缺失')
+
+    expect(() =>
+      addExpense(
+        ledger,
+        {
+          amountCents: 100,
+          date: '2026-10-02',
+          categoryId: LUNCH_CATEGORY,
+          tagIds: [wechat.id],
+        },
+        ctx(),
+      ),
+    ).not.toThrow()
+    expect(() =>
+      addExpense(
+        ledger,
+        {
+          amountCents: 100,
+          date: '2026-10-03',
+          categoryId: LUNCH_CATEGORY,
+          tagIds: ['tag-missing'],
+        },
+        ctx(),
+      ),
+    ).toThrowError(/标签不存在/)
+  })
+
+  it('updateExpense:patch.tagIds 未知实体被拒;不触碰标签的编辑不受历史悬空引用影响', async () => {
+    const ledger = fixtureLedger()
+    const [wechat] = await upsertTagsByName(ledger, ['微信'], NOW)
+    if (!wechat) throw new Error('fixture: 标签缺失')
+    addExpense(
+      ledger,
+      { amountCents: 100, date: '2026-10-02', categoryId: LUNCH_CATEGORY, tagIds: [wechat.id] },
+      ctx(),
+    )
+    const { id } = expenseAt(ledger, '2026-10', 0)
+
+    expect(() => updateExpense(ledger, id, { tagIds: ['tag-missing'] }, ctx())).toThrowError(
+      /标签不存在/,
+    )
+    expect(() => updateExpense(ledger, id, { amountCents: 200 }, ctx())).not.toThrow()
+    expect(() => updateExpense(ledger, id, { tagIds: [wechat.id] }, ctx())).not.toThrow()
+    expect(expenseAt(ledger, '2026-10', 0).tagIds).toEqual([wechat.id])
   })
 })
 

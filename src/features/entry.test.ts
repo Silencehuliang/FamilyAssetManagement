@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { addExpense, DEFAULT_CATEGORIES, DomainError, type LedgerData } from '../domain'
+import {
+  addExpense,
+  DEFAULT_CATEGORIES,
+  DomainError,
+  type LedgerData,
+  tagIdFromName,
+  upsertTagsByName,
+} from '../domain'
 import {
   ADMIN,
   DINNER_CATEGORY,
@@ -106,9 +113,9 @@ describe('groupCategories(两级分类)', () => {
 })
 
 describe('buildExpenseInput(表单 → 领域输入)', () => {
-  it('金额、日期、分类、备注与标签正确映射;经手人默认记录者本人', () => {
+  it('金额、日期、分类、备注与标签正确映射;经手人默认记录者本人', async () => {
     const ledger = fixtureLedger()
-    const input = buildExpenseInput(
+    const input = await buildExpenseInput(
       ledger,
       form({ note: ' 食堂 ', tagsText: '微信, 现金' }),
       XIAOHONG.id,
@@ -118,51 +125,55 @@ describe('buildExpenseInput(表单 → 领域输入)', () => {
       amountCents: 1250,
       date: '2026-10-02',
       categoryId: LUNCH_CATEGORY,
-      tagNames: ['微信', '现金'],
+      tagIds: [await tagIdFromName('微信'), await tagIdFromName('现金')],
       memberId: XIAOHONG.id,
       note: '食堂',
     })
+    // 旧编辑器写路径不再产出废弃 tagNames(评审修复)
+    expect(input).not.toHaveProperty('tagNames')
   })
 
-  it('代记:显式经手人优先;备注为空时省略字段', () => {
+  it('代记:显式经手人优先;备注为空时省略字段', async () => {
     const ledger = fixtureLedger()
-    const input = buildExpenseInput(ledger, form({ memberId: ADMIN.id }), XIAOHONG.id)
+    const input = await buildExpenseInput(ledger, form({ memberId: ADMIN.id }), XIAOHONG.id)
 
     expect(input.memberId).toBe(ADMIN.id)
     expect(input.note).toBeUndefined()
   })
 
-  it('父分类/未知分类/非法日期分别报错', () => {
+  it('父分类/未知分类/非法日期分别报错', async () => {
     const ledger = fixtureLedger()
-    expect(() =>
+    await expect(
       buildExpenseInput(ledger, form({ categoryId: 'cat-dining' }), XIAOHONG.id),
-    ).toThrow(/子分类/)
-    expect(() =>
+    ).rejects.toThrow(/子分类/)
+    await expect(
       buildExpenseInput(ledger, form({ categoryId: 'cat-missing' }), XIAOHONG.id),
-    ).toThrow(/分类/)
-    expect(() => buildExpenseInput(ledger, form({ date: '2026/10/02' }), XIAOHONG.id)).toThrow(
-      /日期/,
-    )
+    ).rejects.toThrow(/分类/)
+    await expect(
+      buildExpenseInput(ledger, form({ date: '2026/10/02' }), XIAOHONG.id),
+    ).rejects.toThrow(/日期/)
   })
 })
 
 describe('buildExpensePatch(表单 → 更新补丁,明细页编辑)', () => {
-  it('备注清空传 null,非空传去除首尾空白的文本', () => {
+  it('备注清空传 null,非空传去除首尾空白的文本', async () => {
     const ledger = fixtureLedger()
-    expect(buildExpensePatch(ledger, form({ note: '   ' })).note).toBeNull()
-    expect(buildExpensePatch(ledger, form({ note: ' 新备注 ' })).note).toBe('新备注')
+    expect((await buildExpensePatch(ledger, form({ note: '   ' }))).note).toBeNull()
+    expect((await buildExpensePatch(ledger, form({ note: ' 新备注 ' }))).note).toBe('新备注')
   })
 
-  it('空经手人表示保持原值(undefined),显式经手人进入补丁', () => {
+  it('空经手人表示保持原值(undefined),显式经手人进入补丁', async () => {
     const ledger = fixtureLedger()
-    expect(buildExpensePatch(ledger, form({ memberId: '' })).memberId).toBeUndefined()
-    expect(buildExpensePatch(ledger, form({ memberId: ADMIN.id })).memberId).toBe(ADMIN.id)
+    expect((await buildExpensePatch(ledger, form({ memberId: '' }))).memberId).toBeUndefined()
+    expect((await buildExpensePatch(ledger, form({ memberId: ADMIN.id }))).memberId).toBe(ADMIN.id)
   })
 
-  it('与新增共用校验:父分类/非法金额被拒', () => {
+  it('与新增共用校验:父分类/非法金额被拒', async () => {
     const ledger = fixtureLedger()
-    expect(() => buildExpensePatch(ledger, form({ categoryId: 'cat-dining' }))).toThrow(/子分类/)
-    expect(() => buildExpensePatch(ledger, form({ amountText: '0' }))).toThrow(/金额/)
+    await expect(buildExpensePatch(ledger, form({ categoryId: 'cat-dining' }))).rejects.toThrow(
+      /子分类/,
+    )
+    await expect(buildExpensePatch(ledger, form({ amountText: '0' }))).rejects.toThrow(/金额/)
   })
 })
 
@@ -231,15 +242,16 @@ describe('recentExpenses(最近记录)', () => {
 })
 
 describe('端到端:表单输入写入账本(纯逻辑)', () => {
-  it('代记 + 标签 + 默认分类兜底可完成一笔记录', () => {
+  it('代记 + 标签 + 默认分类兜底可完成一笔记录(实体补建后只写 tagIds)', async () => {
     const ledger = fixtureLedger()
     ledger.meta.categories = []
     ensureCategories(ledger)
-    const input = buildExpenseInput(
+    const input = await buildExpenseInput(
       ledger,
       form({ memberId: ADMIN.id, tagsText: '现金', amountText: '35' }),
       XIAOHONG.id,
     )
+    await upsertTagsByName(ledger, ['现金'], NOW)
     addExpense(ledger, input, { actor: XIAOHONG, now: NOW, newId: 'e-added' })
 
     const expense = ledger.months['2026-10']?.expenses[0]
@@ -247,7 +259,11 @@ describe('端到端:表单输入写入账本(纯逻辑)', () => {
       amountCents: 3500,
       memberId: ADMIN.id,
       recordedBy: XIAOHONG.id,
-      tagNames: ['现金'],
+      tagIds: [await tagIdFromName('现金')],
     })
+    expect(expense && 'tagNames' in expense).toBe(false)
+    expect(ledger.meta.tags).toEqual([
+      { id: await tagIdFromName('现金'), name: '现金', updatedAt: NOW },
+    ])
   })
 })

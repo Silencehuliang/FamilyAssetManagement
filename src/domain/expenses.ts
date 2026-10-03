@@ -1,4 +1,5 @@
 import { findCategory, findMember } from './lookup'
+import { findTag } from './tags'
 import type {
   Category,
   DateKey,
@@ -130,6 +131,11 @@ function tagsForWrite(input: {
   return { tagIds: [] }
 }
 
+/** 写入的 tagIds 必须指向账本中已有的标签实体(unknown_tag);废弃 tagNames 路径由迁移引擎负责补建 */
+function assertKnownTagIds(ledger: LedgerData, tagIds: readonly string[]): void {
+  for (const id of tagIds) findTag(ledger, id)
+}
+
 export function addExpense(
   ledger: LedgerData,
   input: ExpenseInput,
@@ -138,6 +144,7 @@ export function addExpense(
   assertActive(ctx.actor)
   const memberId = input.memberId ?? ctx.actor.id
   validateForWrite(ledger, { ...input, memberId })
+  if (input.tagIds !== undefined) assertKnownTagIds(ledger, input.tagIds)
 
   const expense: Expense = {
     id: ctx.newId,
@@ -166,6 +173,7 @@ export function updateExpense(
   assertActive(ctx.actor)
   const { month, expense } = findExpense(ledger, id)
   assertCanEdit(ctx.actor, expense)
+  if (patch.tagIds !== undefined) assertKnownTagIds(ledger, patch.tagIds)
 
   const next: Expense = { ...expense }
   if (patch.amountCents !== undefined) next.amountCents = patch.amountCents

@@ -7,6 +7,7 @@ import {
   canEditExpense,
   type DateKey,
   type Expense,
+  expenseTagIds,
   type LedgerData,
   type Member,
   type MemberId,
@@ -56,11 +57,18 @@ function categoryNamesOf(category: Category | undefined, byId: Map<string, Categ
 }
 
 /**
- * 兼容读取废弃的 v1 自由标签文本:新模型下记录只有 tagIds,标签筛选/回填
- * 待标签体系 UI(V6/V7)接入后改走标签实体;此处缺失即视为空。
+ * 标签名字解析(读路径,评审修复):优先按 tagIds 从账本实体解析(未知 id 静默
+ * 过滤,删除实体后遗留的引用不显示);一个都解析不到且记录仍带 v1 tagNames 时
+ * 回退旧字段 —— 迁移完成前的旧缓存与离线账本仍能正确显示。
  */
-function legacyTagNames(expense: Expense): string[] {
-  return Array.isArray(expense.tagNames) ? expense.tagNames : []
+function tagNamesOf(ledger: LedgerData, expense: Expense): string[] {
+  const names: string[] = []
+  for (const id of expenseTagIds(expense)) {
+    const tag = ledger.meta.tags.find((item) => item.id === id)
+    if (tag) names.push(tag.name)
+  }
+  if (names.length === 0 && Array.isArray(expense.tagNames)) return [...expense.tagNames]
+  return names
 }
 
 /**
@@ -81,7 +89,7 @@ export function filterExpenses(
       if (category?.parentId !== filters.parentId) return false
     }
     if (filters.memberId !== '' && expense.memberId !== filters.memberId) return false
-    const tagNames = legacyTagNames(expense)
+    const tagNames = tagNamesOf(ledger, expense)
     if (filters.tag !== '' && !tagNames.includes(filters.tag)) return false
     if (keyword !== '') {
       const haystack = [
@@ -98,8 +106,8 @@ export function filterExpenses(
 }
 
 /**
- * 明细列表条目视图:`tagNames` 为迁移前兼容字段(缺失时补空数组),仅供旧版
- * 明细页渲染标签使用;标签体系 UI(V6/V7)改用 tagIds/标签实体后应删除本别名。
+ * 明细列表条目视图:`tagNames` 由 tagIds 经账本标签实体解析而来(未知 id 过滤),
+ * 仅供旧版明细页渲染标签使用;标签体系 UI(V6/V7)直接使用 tagIds/实体后应删除本别名。
  */
 export type EntryView = Expense & { tagNames: string[] }
 
@@ -109,12 +117,12 @@ export interface DayGroupEntries {
   expenses: EntryView[]
 }
 
-/** 按日倒序分组;组内按记录时间倒序、id 兜底,保证展示与测试稳定 */
-export function groupByDay(expenses: Expense[]): DayGroupEntries[] {
+/** 按日倒序分组;标签名字按账本实体解析;组内按记录时间倒序、id 兜底,保证展示与测试稳定 */
+export function groupByDay(ledger: LedgerData, expenses: Expense[]): DayGroupEntries[] {
   const buckets = new Map<DateKey, EntryView[]>()
   for (const expense of expenses) {
     const bucket = buckets.get(expense.date) ?? []
-    bucket.push({ ...expense, tagNames: legacyTagNames(expense) })
+    bucket.push({ ...expense, tagNames: tagNamesOf(ledger, expense) })
     buckets.set(expense.date, bucket)
   }
   const groups: DayGroupEntries[] = []
@@ -147,11 +155,11 @@ export function sumCents(expenses: Expense[]): number {
   return total
 }
 
-/** 该月出现过的全部标签,去重升序;供标签筛选下拉(兼容读取 tagNames) */
+/** 该月出现过的全部标签名字,去重升序;由 tagIds 经实体解析(旧字段兜底) */
 export function tagsOfMonth(ledger: LedgerData, month: MonthKey): string[] {
   const tags = new Set<string>()
   for (const expense of ledger.months[month]?.expenses ?? []) {
-    for (const tag of legacyTagNames(expense)) tags.add(tag)
+    for (const tag of tagNamesOf(ledger, expense)) tags.add(tag)
   }
   return [...tags].sort((a, b) => TAG_COLLATOR.compare(a, b))
 }
@@ -213,7 +221,7 @@ export function formatAmountInput(cents: number): string {
   return `${yuan}.${fraction}`
 }
 
-/** 支出 → 记一笔表单初值(编辑表单回填);分类缺失时父分类留空 */
+/** 支出 → 记一笔表单初值(编辑表单回填);分类缺失时父分类留空;标签按实体解析成名字 */
 export function expenseToForm(ledger: LedgerData, expense: Expense): EntryForm {
   const category = ledger.meta.categories.find((c) => c.id === expense.categoryId)
   return {
@@ -222,7 +230,7 @@ export function expenseToForm(ledger: LedgerData, expense: Expense): EntryForm {
     categoryId: expense.categoryId,
     date: expense.date,
     note: expense.note ?? '',
-    tagsText: legacyTagNames(expense).join(', '),
+    tagsText: tagNamesOf(ledger, expense).join(', '),
     memberId: expense.memberId,
   }
 }

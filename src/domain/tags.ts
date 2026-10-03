@@ -50,6 +50,49 @@ export async function tagIdFromName(name: string): Promise<TagId> {
   return `tag-${toHex(new Uint8Array(digest, 0, 8))}`
 }
 
+/** 一批名字 → 确定性标签 id(逐名去空白;空名忽略;顺序保持,不做去重) */
+export async function tagIdsFromNames(names: readonly string[]): Promise<TagId[]> {
+  const ids: TagId[] = []
+  for (const raw of names) {
+    const name = raw.trim()
+    if (name === '') continue
+    ids.push(await tagIdFromName(name))
+  }
+  return ids
+}
+
+/**
+ * 按名字批量补建标签实体(旧编辑器的兼容写路径,评审修复):名字经
+ * `tagIdFromName` 派生确定性 id;同 id 已存在时保留既有实体(名字/updatedAt
+ * 不动 —— 旧编辑器按名字回填,不得把并发改名覆盖回去),缺失的补建
+ * `{ id, name, updatedAt: now }`。返回按输入顺序去重后的实体列表。
+ * 空名忽略;多设备各自补建同一名字会得到同一 id,合并即收敛。
+ */
+export async function upsertTagsByName(
+  ledger: LedgerData,
+  names: readonly string[],
+  now: string,
+): Promise<Tag[]> {
+  const result: Tag[] = []
+  const seen = new Set<TagId>()
+  for (const raw of names) {
+    const name = raw.trim()
+    if (name === '') continue
+    const id = await tagIdFromName(name)
+    if (seen.has(id)) continue
+    seen.add(id)
+    const existing = ledger.meta.tags.find((tag) => tag.id === id)
+    if (existing) {
+      result.push(existing)
+      continue
+    }
+    const tag: Tag = { id, name, updatedAt: now }
+    ledger.meta.tags.push(tag)
+    result.push(tag)
+  }
+  return result
+}
+
 export function findTag(ledger: LedgerData, id: TagId): Tag {
   const tag = ledger.meta.tags.find((t) => t.id === id)
   if (!tag) throw new DomainError('unknown_tag', `标签不存在:${id}`)

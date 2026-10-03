@@ -80,8 +80,10 @@ describe('createRemoteEndpoint', () => {
 })
 
 describe('管理员专属元数据的成员端策略(评审回归)', () => {
-  it('成员会话:分类/预算只拉不推,写操作本地跳过不发请求', async () => {
-    const putLedgerFile = vi.fn(async () => ({ revision: 'sha-x' }))
+  it('成员会话:分类/预算/标签组只拉不推,写操作本地跳过不发请求', async () => {
+    const putLedgerFile = vi.fn(
+      async (_path: string, _content: string, _baseRevision?: string) => ({ revision: 'sha-x' }),
+    )
     const api = {
       ...fakeApi({ putLedgerFile }),
       getSession: () => ({ member: { role: 'member' } }),
@@ -92,20 +94,35 @@ describe('管理员专属元数据的成员端策略(评审回归)', () => {
       revision: expect.any(String),
     })
     await expect(endpoint.deleteFile('ledger/meta/budgets.json')).resolves.toBeUndefined()
+    // 标签组仅管理员可写:成员写入被本地跳过,否则服务端 403 会让队列永久卡死(评审修复)
+    await expect(endpoint.putFile('ledger/meta/tagGroups.json', '{}\n')).resolves.toMatchObject({
+      revision: expect.any(String),
+    })
+    await expect(endpoint.deleteFile('ledger/meta/tagGroups.json')).resolves.toBeUndefined()
     expect(putLedgerFile).not.toHaveBeenCalled()
 
-    // 月度支出文件不受影响,照常推送
+    // 月度支出文件与标签实体不受影响,照常推送(标签全员可写)
     await endpoint.putFile('ledger/months/2026-10.json', '{}\n')
-    expect(putLedgerFile).toHaveBeenCalledTimes(1)
+    await endpoint.putFile('ledger/meta/tags.json', '{"tags":[]}\n')
+    expect(putLedgerFile).toHaveBeenCalledTimes(2)
+    expect(putLedgerFile.mock.calls.map((call) => call[0])).toEqual([
+      'ledger/months/2026-10.json',
+      'ledger/meta/tags.json',
+    ])
   })
 
-  it('管理员会话:分类元数据照常推送', async () => {
-    const putLedgerFile = vi.fn(async () => ({ revision: 'sha-a' }))
+  it('管理员会话:分类与标签组元数据照常推送', async () => {
+    const putLedgerFile = vi.fn(
+      async (_path: string, _content: string, _baseRevision?: string) => ({ revision: 'sha-a' }),
+    )
     const api = {
       ...fakeApi({ putLedgerFile }),
       getSession: () => ({ member: { role: 'admin' } }),
     }
-    await createRemoteEndpoint(api).putFile('ledger/meta/categories.json', '{}\n')
-    expect(putLedgerFile).toHaveBeenCalledTimes(1)
+    const endpoint = createRemoteEndpoint(api)
+
+    await endpoint.putFile('ledger/meta/categories.json', '{}\n')
+    await endpoint.putFile('ledger/meta/tagGroups.json', '{"groups":[]}\n')
+    expect(putLedgerFile).toHaveBeenCalledTimes(2)
   })
 })

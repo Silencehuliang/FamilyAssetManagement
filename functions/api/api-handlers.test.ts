@@ -652,6 +652,27 @@ describe('PUT /api/ledger/file', () => {
     expect(denied.status).toBe(403)
     expect(await jsonOf(denied)).toMatchObject({ error: 'forbidden' })
   })
+
+  it('管理员可写 tags.json 与 tagGroups.json(契约矩阵补全)', async () => {
+    const admin = await seededMember('ada', 'admin-pw-1', { role: 'admin' })
+    stub = githubStub({ [MEMBERS_FILE]: serializeMembers([admin]) })
+    vi.stubGlobal('fetch', stub.impl)
+    const token = await createSession(admin, ENV.JWT_SECRET)
+
+    const cases = [
+      { path: 'ledger/meta/tags.json', content: '{"tags":[]}' },
+      { path: 'ledger/meta/tagGroups.json', content: '{"groups":[]}' },
+    ]
+    for (const input of cases) {
+      const response = await ledgerPut({
+        request: ledgerPutRequest(input, token),
+        env: ENV,
+      })
+      expect(response.status).toBe(200)
+      expect(await jsonOf(response)).toMatchObject({ sha: expect.any(String) })
+      expect(stub.files.get(input.path)).toBe(input.content)
+    }
+  })
 })
 
 describe('GET /api/members', () => {

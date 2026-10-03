@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { addExpense, DEFAULT_CATEGORIES, type LedgerData } from '../domain'
+import { addExpense, DEFAULT_CATEGORIES, type LedgerData, tagIdFromName } from '../domain'
 import {
   ADMIN,
   DALI,
   DINNER_CATEGORY,
   fixtureLedger,
   LUNCH_CATEGORY,
+  NOW,
   XIAOHONG,
 } from '../domain/fixtures'
 import {
@@ -147,7 +148,7 @@ describe('groupByDay / sumCents(按日分组与汇总)', () => {
     ])
     const all = Object.values(ledger.months).flatMap((month) => month.expenses)
 
-    const groups = groupByDay(all)
+    const groups = groupByDay(ledger, all)
 
     expect(groups.map((g) => g.date)).toEqual(['2026-10-05', '2026-10-02'])
     expect(groups[1]?.totalCents).toBe(1250)
@@ -155,7 +156,7 @@ describe('groupByDay / sumCents(按日分组与汇总)', () => {
     // 同日两条:后记的 e-1 在前
     expect(groups[1]?.expenses.map((e) => e.id)).toEqual(['e-1', 'e-0'])
     expect(sumCents(all)).toBe(11150)
-    expect(groupByDay([])).toEqual([])
+    expect(groupByDay(fixtureLedger(), [])).toEqual([])
     expect(sumCents([])).toBe(0)
   })
 })
@@ -241,7 +242,7 @@ describe('expenseToForm / formatAmountInput(编辑回填)', () => {
     expect(formatAmountInput(cents)).toBe(text)
   })
 
-  it('支出回填为表单初值:父分类、标签与备注还原', () => {
+  it('旧数据兼容回退:只有 v1 tagNames 时迁移完成前也能回填', () => {
     const ledger = ledgerWith([
       {
         amountCents: 1250,
@@ -278,5 +279,42 @@ describe('expenseToForm / formatAmountInput(编辑回填)', () => {
     const form = expenseToForm(ledger, expense)
     expect(form.parentId).toBe('')
     expect(form.categoryId).toBe(LUNCH_CATEGORY)
+  })
+})
+
+describe('标签实体解析(读路径,评审修复)', () => {
+  it('tagIds 经账本实体解析为名字:筛选/月标签/按日视图/表单回填;悬空 id 静默过滤', async () => {
+    const ledger = fixtureLedger()
+    const wechat = await tagIdFromName('微信')
+    const cash = await tagIdFromName('现金')
+    ledger.meta.tags = [
+      { id: cash, name: '现金', updatedAt: NOW },
+      { id: wechat, name: '微信', updatedAt: NOW },
+    ]
+    addExpense(
+      ledger,
+      {
+        amountCents: 1250,
+        date: '2026-10-02',
+        categoryId: LUNCH_CATEGORY,
+        tagIds: [wechat],
+        note: '楼下超市',
+      },
+      { actor: XIAOHONG, now: NOW, newId: 'e-tagged' },
+    )
+    const tagged = ledger.months['2026-10']?.expenses[0]
+    if (!tagged) throw new Error('fixture: 支出缺失')
+    // 模拟实体被删除后的悬空引用(并集合并/旧数据可能出现):读取时静默过滤
+    tagged.tagIds = [wechat, 'tag-missing']
+    const all = Object.values(ledger.months).flatMap((month) => month.expenses)
+
+    expect(filterExpenses(ledger, all, filters({ tag: '微信' })).map((e) => e.id)).toEqual([
+      'e-tagged',
+    ])
+    expect(filterExpenses(ledger, all, filters({ tag: 'tag-missing' }))).toHaveLength(0)
+    expect(filterExpenses(ledger, all, filters({ keyword: '现金' }))).toHaveLength(0)
+    expect(tagsOfMonth(ledger, '2026-10')).toEqual(['微信'])
+    expect(expenseToForm(ledger, tagged).tagsText).toBe('微信')
+    expect(groupByDay(ledger, all)[0]?.expenses[0]?.tagNames).toEqual(['微信'])
   })
 })

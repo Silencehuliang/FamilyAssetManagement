@@ -86,7 +86,10 @@ export interface RecurringExpense {
   categoryId: CategoryId
   /** 补记支出携带的标签实体 id;旧规则可缺省 */
   tagIds?: TagId[]
-  /** @deprecated v1 自由标签文本;由补记生成的支出经迁移引擎转换后移除 */
+  /**
+   * @deprecated v1 自由标签文本;旧规则仅为兼容读取保留,新写入一律使用 tagIds。
+   * 补记生成的支出只携带规则上的 tagIds,不再复制本字段(评审修复)。
+   */
   tagNames: string[]
   /** 经手人(补记的支出归属该成员) */
   memberId: MemberId

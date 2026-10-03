@@ -198,9 +198,8 @@ export function generateDueExpenses(
         amountCents: rule.amountCents,
         date,
         categoryId: rule.categoryId,
-        tagIds: rule.tagIds ? [...rule.tagIds] : [],
-        // 旧规则的自由标签文本原样带出,由迁移引擎转换为 tagIds(不丢历史标签)
-        tagNames: [...rule.tagNames],
+        // 只带规则上的标签实体 id;旧规则的 tagNames 不再复制到生成支出(评审修复)
+        tagIds: [...(rule.tagIds ?? [])],
         memberId: rule.memberId,
         recordedBy: rule.createdBy ?? rule.memberId,
         note: rule.note ?? RECURRING_DEFAULT_NOTE,
@@ -221,7 +220,7 @@ export interface RecurringInput {
   categoryId: CategoryId
   /** 补记支出携带的标签实体 id(新模型) */
   tagIds?: TagId[]
-  /** @deprecated v1 自由标签文本;由补记支出经迁移引擎转换 */
+  /** @deprecated v1 自由标签文本;旧表单保存时由 AppController 补建实体并转为 tagIds */
   tagNames?: string[]
   /** 经手人,缺省为创建者本人 */
   memberId?: MemberId

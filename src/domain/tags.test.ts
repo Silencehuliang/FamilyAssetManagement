@@ -22,6 +22,7 @@ import {
   TAG_PALETTE,
   tagIdFromName,
   updateTagGroup,
+  upsertTagsByName,
 } from './tags'
 import type { LedgerData, TagColor, TagGroup } from './types'
 
@@ -60,6 +61,35 @@ describe('tagIdFromName(确定性 id)', () => {
     expect(first).toBe(second)
     expect(first).toMatch(/^tag-[0-9a-f]{16}$/)
     expect(await tagIdFromName('旅行 ')).not.toBe(first) // 不做隐式 trim,派生是名字的纯函数
+  })
+})
+
+describe('upsertTagsByName(旧编辑器兼容写路径,评审修复)', () => {
+  it('补建缺失实体:确定性 id、名字去空白、输入去重、顺序保持', async () => {
+    const ledger = fixtureLedger()
+
+    const tags = await upsertTagsByName(ledger, [' 微信 ', '现金', '微信'], NOW)
+
+    expect(tags).toEqual([
+      { id: await tagIdFromName('微信'), name: '微信', updatedAt: NOW },
+      { id: await tagIdFromName('现金'), name: '现金', updatedAt: NOW },
+    ])
+    expect(ledger.meta.tags).toEqual(tags)
+  })
+
+  it('已有实体保持原样(名字/updatedAt 不被覆盖);空名忽略', async () => {
+    const ledger = fixtureLedger()
+    const existing = {
+      id: await tagIdFromName('微信'),
+      name: '微信(旧名)',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    }
+    ledger.meta.tags = [existing]
+
+    const tags = await upsertTagsByName(ledger, ['微信', '', '  '], NOW)
+
+    expect(tags).toEqual([existing])
+    expect(ledger.meta.tags).toEqual([existing])
   })
 })
 

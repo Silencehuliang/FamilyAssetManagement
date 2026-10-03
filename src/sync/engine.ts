@@ -1,12 +1,13 @@
-import type {
-  Budget,
-  Category,
-  Expense,
-  LedgerData,
-  Member,
-  MonthKey,
-  Tag,
-  TagGroup,
+import {
+  type Budget,
+  type Category,
+  type Expense,
+  type LedgerData,
+  type Member,
+  type MonthKey,
+  normalizeLedgerShape,
+  type Tag,
+  type TagGroup,
 } from '../domain'
 import type { RemoteFile, SyncEndpoint } from './endpoint'
 import {
@@ -33,6 +34,12 @@ import {
  * - 标签组:同分类走 adminFilesPolicy(成员端 remote-wins,管理员端 local-wins)。
  * - 预算:默认按月份键合并(本地优先);remote-wins 时采用远端文件。
  * - 支出按其日期所属月份重新归档:记录被改期后自动换月文件,旧月份随之清空。
+ *
+ * 单管理员写入假设(T9,评审确认的非缺陷):分类与标签组是「单管理员写入」数据 ——
+ * 生产环境初始化只创建一个管理员,且新建成员固定为 member 角色,因此同一账本
+ * 不存在两个管理员各自并发维护分类/组数据的可达路径;mergeWithoutTimestamps
+ * (local-wins)与 remote-wins 的文件级策略在此前提下不会 ping-pong。若未来放开
+ * 多管理员,须改为记录级 LWW 或显式冲突策略,否则两端会互相推送各自副本。
  *
  * 合并输出规范化:各集合按 id 升序(支出再按日期),月份键与预算键按字典序,
  * 保证两端对同一合并结果生成逐字节相同的文件内容。
@@ -155,6 +162,11 @@ function mergeLedgers(
     budgets: AdminFilesPolicy
   },
 ): { merged: LedgerData; conflictsResolved: number } {
+  // 防御性规范化两侧形状:旧缓存可能没有 meta.tags/meta.tagGroups(评审修复),
+  // 直接合并会抛 TypeError 并被当作离线。规范化幂等,对当前形状无影响。
+  normalizeLedgerShape(local)
+  normalizeLedgerShape(remote)
+
   const counter: Counter = { n: 0 }
   const expenses = mergeTimestamped(
     Object.values(local.months).flatMap((data) => data.expenses),
@@ -233,6 +245,8 @@ export async function sync(
   endpoint: SyncEndpoint,
   options: SyncOptions = {},
 ): Promise<SyncResult> {
+  // 旧缓存(缺 months/meta 集合)先补全,避免 ledgerToFiles 在合并前抛错
+  normalizeLedgerShape(local)
   const before = ledgerToFiles(local)
   const remoteFiles = await endpoint.listFiles()
 

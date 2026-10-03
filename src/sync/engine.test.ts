@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import type { Expense, RecurringExpense } from '../domain'
+import type { Expense, LedgerData, RecurringExpense } from '../domain'
 import { addExpense, createEmptyLedger, deleteCategory } from '../domain'
 import { ADMIN, DINNER_CATEGORY, fixtureLedger, LUNCH_CATEGORY, XIAOHONG } from '../domain/fixtures'
 import type { PutResult, RemoteFile, SyncEndpoint } from './endpoint'
 import { sync } from './engine'
-import { filesToLedger, ledgerToFiles, monthFilePath } from './files'
+import { filesToLedger, ledgerToFiles, monthFilePath, TAG_GROUPS_FILE, TAGS_FILE } from './files'
 import { InMemoryEndpoint } from './in-memory'
 import { PendingQueue, replay } from './queue'
 
@@ -321,6 +321,46 @@ describe('sync', () => {
     expect(a.months['2026-10']?.expenses.find((e) => e.id === 'e-1')?.amountCents).toBe(2800)
     expect(aFinal.pushedFiles).toBe(0)
     expect(aFinal.conflictsResolved).toBe(1)
+  })
+
+  it('v1 形状(缺 tags/tagGroups)的本地账本与远端文件集合并不抛错(评审修复)', async () => {
+    const legacyExpense = {
+      id: 'e-legacy',
+      amountCents: 1000,
+      date: '2026-10-02',
+      categoryId: 'c-1',
+      tagNames: ['微信'],
+      memberId: 'm-1',
+      recordedBy: 'm-1',
+      createdAt: T0,
+      updatedAt: T0,
+    }
+    const legacyLedger = {
+      meta: {
+        members: [],
+        categories: [{ id: 'c-1', name: '餐饮', sortOrder: 1 }],
+        budgets: {},
+        recurring: [],
+      },
+      months: { '2026-10': { expenses: [legacyExpense] } },
+    } as unknown as LedgerData
+    // 远端同样是 v1 文件集:没有 tags.json / tagGroups.json
+    const remoteFiles = ledgerToFiles(legacyLedger)
+    delete remoteFiles[TAGS_FILE]
+    delete remoteFiles[TAG_GROUPS_FILE]
+    const endpoint = new InMemoryEndpoint(remoteFiles)
+
+    const result = await sync(legacyLedger, endpoint)
+
+    // 合并前补全形状:不抛 TypeError,空集合参与合并
+    expect(legacyLedger.meta.tags).toEqual([])
+    expect(legacyLedger.meta.tagGroups).toEqual([])
+    expect(legacyLedger.months['2026-10']?.expenses[0]?.tagIds).toEqual([])
+    // legacy tagNames 留给迁移引擎(engine 不做迁移),规范化结果推回远端
+    expect(legacyLedger.months['2026-10']?.expenses[0]?.tagNames).toEqual(['微信'])
+    expect(result.pushedFiles).toBeGreaterThan(0)
+    const remote = filesToLedger(await contentsOf(endpoint))
+    expect(remote.meta.tags).toEqual([])
   })
 })
 

@@ -1,10 +1,13 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import type { LedgerApi } from '../api/client'
 import type { Expense, LedgerData, Member, MutationContext } from '../domain'
 import { addExpense, deleteExpense, deleteTag, deleteTagGroup } from '../domain'
+import { XIAOHONG } from '../domain/fixtures'
 import { sync } from './engine'
-import { filesToLedger, ledgerToFiles, monthFilePath } from './files'
+import { filesToLedger, ledgerToFiles, monthFilePath, TAG_GROUPS_FILE, TAGS_FILE } from './files'
 import { InMemoryEndpoint } from './in-memory'
 import { PendingQueue, replay } from './queue'
+import { createRemoteEndpoint } from './remote'
 
 /** 成员数据不属同步文件集(服务端专管):比较账本内容时忽略 members */
 function sansMembers<L extends { meta: { members: unknown[] } }>(l: L): L {
@@ -72,6 +75,28 @@ async function contentsOf(endpoint: InMemoryEndpoint): Promise<Record<string, st
   const contents: Record<string, string> = {}
   for (const [path, file] of Object.entries(files)) contents[path] = file.content
   return contents
+}
+
+/** 角色感知的 LedgerApi 替身:文件操作直连内存端点,并统计真实发出的 putLedgerFile */
+function spyApi(shared: InMemoryEndpoint, role: 'admin' | 'member') {
+  const putLedgerFile = vi.fn((path: string, content: string, baseRevision?: string) =>
+    shared.putFile(path, content, baseRevision),
+  )
+  const deleteLedgerFile = vi.fn((path: string, baseRevision?: string) =>
+    shared.deleteFile(path, baseRevision),
+  )
+  const api = {
+    setup: vi.fn(),
+    login: vi.fn(),
+    getMembers: vi.fn(),
+    listLedgerFiles: vi.fn(() => shared.listFiles()),
+    getLedgerFile: vi.fn(),
+    putLedgerFile,
+    deleteLedgerFile,
+    probeInitialization: vi.fn(),
+    getSession: () => ({ member: { role } }),
+  } satisfies LedgerApi & { getSession(): { member: { role: string } } | null }
+  return { api, putLedgerFile }
 }
 
 function monthContentOf(ledger: LedgerData, month: string): string {
@@ -243,6 +268,8 @@ describe('replay', () => {
     expect(queue.size).toBe(0)
   })
 
+  // 注:以下标签删除回放用裸 InMemoryEndpoint(无角色过滤)驱动,等价管理员会话;
+  // 成员会话会跳过 tagGroups.json 写入,语义见下一条用例(评审修复)。
   it('标签与标签组删除按登记顺序回放(合并复活后补删并推送),第二台设备同步后同样干净', async () => {
     const baseline = taggedLedger()
     const shared = new InMemoryEndpoint(ledgerToFiles(baseline))
@@ -298,6 +325,44 @@ describe('replay', () => {
     expect(result.pushedFiles).toBe(3) // tags + 支出月份 + 标签组引用清理
     expect(filesToLedger(await contentsOf(shared))).toEqual(sansMembers(local))
     expect(queue.size).toBe(0)
+  })
+
+  it('成员会话 delete-tag:tagGroups 写入被跳过,队列清空,远端保留组副本,第二台设备收敛(评审修复)', async () => {
+    const baseline = taggedLedger()
+    const shared = new InMemoryEndpoint(ledgerToFiles(baseline))
+    const { api, putLedgerFile } = spyApi(shared, 'member')
+    const endpoint = createRemoteEndpoint(api)
+
+    const local = structuredClone(baseline)
+    deleteTag(local, XIAOHONG, 'tag-1', '2026-10-02T09:00:00.000Z')
+    const queue = new PendingQueue()
+    queue.record({ type: 'delete-tag', id: 'tag-1' })
+
+    const result = await replay(queue, local, endpoint)
+
+    // 队列必须清空:tagGroups 写入被本地跳过(不再发出 403),否则永久错误循环
+    expect(queue.size).toBe(0)
+    expect(result.pushedFiles).toBeGreaterThan(0)
+    const putPaths = putLedgerFile.mock.calls.map((call) => call[0])
+    expect(putPaths).toContain(TAGS_FILE) // 标签实体全员可写:删除正常传播
+    expect(putPaths).not.toContain(TAG_GROUPS_FILE) // 成员无权写组:跳过
+
+    const remote = filesToLedger(await contentsOf(shared))
+    expect(remote.meta.tags).toEqual([])
+    // 远端保留管理员的组副本(组内引用已删除的标签 id:读取方过滤悬空引用)
+    expect(remote.meta.tagGroups).toEqual([
+      { id: 'g-1', name: '支付方式', color: 'blue', tagIds: ['tag-1'], singleSelect: true },
+    ])
+    // 成员本地的组引用清理仍然生效,只是不外传
+    expect(local.meta.tagGroups).toEqual([
+      { id: 'g-1', name: '支付方式', color: 'blue', tagIds: [], singleSelect: true },
+    ])
+
+    // 第二台设备从端点同步:标签实体删除与支出引用清空收敛
+    const deviceB = filesToLedger(await contentsOf(shared))
+    await sync(deviceB, shared, { adminFilesPolicy: 'remote-wins' })
+    expect(deviceB.meta.tags).toEqual([])
+    expect(deviceB.months['2026-10']?.expenses[0]?.tagIds).toEqual([])
   })
 
   it('delete-tag-group:只补删组,标签实体与支出引用不受影响', async () => {
