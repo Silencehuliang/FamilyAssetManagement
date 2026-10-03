@@ -1,16 +1,14 @@
-import { type ComponentType, type ReactNode, useEffect, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { Toaster, toast } from 'sonner'
-import MdiAccountOutline from '~icons/mdi/account-outline'
-import MdiChartDonut from '~icons/mdi/chart-donut'
-import MdiFormatListBulleted from '~icons/mdi/format-list-bulleted'
-import MdiPlusCircleOutline from '~icons/mdi/plus-circle-outline'
-import MdiWalletOutline from '~icons/mdi/wallet-outline'
+import { AppNav, type AppRoute } from './components/AppNav'
+import { PopupLayout, useDialog } from './components/dialog'
 import { SyncBadge } from './components/SyncBadge'
 import { useTheme } from './components/theme'
 import { AddExpensePage } from './pages/AddExpensePage'
 import { BudgetPage } from './pages/BudgetPage'
 import { CategoriesPage } from './pages/CategoriesPage'
 import { EntriesPage } from './pages/EntriesPage'
+import { HomePage } from './pages/HomePage'
 import { LoginPage } from './pages/LoginPage'
 import { MembersPage } from './pages/MembersPage'
 import { MePage } from './pages/MePage'
@@ -20,22 +18,6 @@ import { StatsPage } from './pages/StatsPage'
 import type { AppState } from './state/app-controller'
 import { appController } from './state/runtime'
 import { useAppState } from './state/use-app'
-
-type TabKey = 'add' | 'entries' | 'stats' | 'budget' | 'me'
-
-interface Tab {
-  key: TabKey
-  label: string
-  icon: ComponentType<{ className?: string }>
-}
-
-const TABS: Tab[] = [
-  { key: 'add', label: '记一笔', icon: MdiPlusCircleOutline },
-  { key: 'entries', label: '明细', icon: MdiFormatListBulleted },
-  { key: 'stats', label: '统计', icon: MdiChartDonut },
-  { key: 'budget', label: '预算', icon: MdiWalletOutline },
-  { key: 'me', label: '我的', icon: MdiAccountOutline },
-]
 
 export default function App() {
   const state = useAppState(appController)
@@ -81,12 +63,37 @@ export default function App() {
 }
 
 function Shell({ state }: { state: AppState }) {
-  const [tab, setTab] = useState<TabKey>('add')
+  const [route, setRoute] = useState<AppRoute>('home')
   const [view, setView] = useState<'categories' | 'members' | 'recurring' | null>(null)
+  const { showDialog } = useDialog()
 
-  const openTab = (key: TabKey): void => {
-    setTab(key)
+  const navigate = (next: AppRoute): void => {
+    setRoute(next)
     setView(null)
+  }
+
+  /** FAB:记账编辑器(V7)接入前先给占位对话框,可跳转到现有表单 */
+  const openEditor = (): void => {
+    void showDialog<void>(
+      ({ close }) => (
+        <PopupLayout title="记一笔">
+          <p className="member-meta">
+            全屏记账编辑器(计算器键盘 / 再记)将在 v1.1 第二批接入;现在可以先用完整记账表单。
+          </p>
+          <button
+            type="button"
+            className="primary-button mt-4"
+            onClick={() => {
+              close(undefined)
+              navigate('add')
+            }}
+          >
+            打开记账表单
+          </button>
+        </PopupLayout>
+      ),
+      { label: '记一笔' },
+    )
   }
 
   return (
@@ -95,7 +102,7 @@ function Shell({ state }: { state: AppState }) {
         <h1>家庭记账</h1>
         <SyncBadge status={state.syncStatus} />
       </header>
-      <main className="app-main">
+      <main className="app-main pb-[calc(5.5rem+var(--safe-area-inset-bottom))] sm:pb-8 sm:pl-[84px]">
         {view === 'categories' ? (
           <CategoriesPage controller={appController} state={state} onBack={() => setView(null)} />
         ) : null}
@@ -107,11 +114,18 @@ function Shell({ state }: { state: AppState }) {
         ) : null}
         {view === null ? (
           <>
-            {tab === 'add' ? <AddExpensePage controller={appController} state={state} /> : null}
-            {tab === 'entries' ? <EntriesPage controller={appController} state={state} /> : null}
-            {tab === 'stats' ? <StatsPage state={state} /> : null}
-            {tab === 'budget' ? <BudgetPage controller={appController} state={state} /> : null}
-            {tab === 'me' ? (
+            {route === 'home' ? (
+              <HomePage
+                controller={appController}
+                state={state}
+                onOpenAdd={() => navigate('add')}
+                onOpenStats={() => navigate('stats')}
+              />
+            ) : null}
+            {route === 'entries' ? <EntriesPage controller={appController} state={state} /> : null}
+            {route === 'stats' ? <StatsPage state={state} /> : null}
+            {route === 'budget' ? <BudgetPage controller={appController} state={state} /> : null}
+            {route === 'me' ? (
               <MePage
                 controller={appController}
                 state={state}
@@ -120,27 +134,11 @@ function Shell({ state }: { state: AppState }) {
                 onOpenRecurring={() => setView('recurring')}
               />
             ) : null}
+            {route === 'add' ? <AddExpensePage controller={appController} state={state} /> : null}
           </>
         ) : null}
       </main>
-      <nav className="grid grid-cols-5 border-t border-border bg-card pb-[var(--safe-area-inset-bottom)]">
-        {TABS.map((t) => {
-          const active = tab === t.key && view === null
-          return (
-            <button
-              key={t.key}
-              type="button"
-              className={`flex cursor-pointer flex-col items-center gap-0.5 border-0 bg-transparent px-0 pt-2 pb-2.5 text-[11px] ${
-                active ? 'text-foreground' : 'text-muted-foreground'
-              }`}
-              onClick={() => openTab(t.key)}
-            >
-              <t.icon className="size-6" />
-              <span>{t.label}</span>
-            </button>
-          )
-        })}
-      </nav>
+      <AppNav route={route} onNavigate={navigate} onCreate={openEditor} />
     </div>
   )
 }

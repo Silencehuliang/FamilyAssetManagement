@@ -823,6 +823,93 @@
   padding: 0;
 }
 
+/* 悬浮胶囊导航(V3):移动端底栏,FAB 居中(72px 轨道,左右权重 1.5:1 保证居中) */
+.app-nav-mobile {
+  position: fixed;
+  z-index: 30;
+  left: 0.5rem;
+  right: 0.5rem;
+  bottom: calc(0.25rem + var(--safe-area-inset-bottom));
+  display: grid;
+  height: 72px;
+  grid-template-columns: 1.5fr 1.5fr 72px 1fr 1fr 1fr;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 9999px;
+  background: color-mix(in oklab, var(--card) 78%, transparent);
+  backdrop-filter: blur(16px) saturate(1.5);
+  box-shadow: 0 8px 30px rgb(0 0 0 / 0.14);
+}
+
+.app-nav-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+
+.app-nav-item[data-active="true"] {
+  color: var(--foreground);
+  font-weight: 600;
+}
+
+.app-nav-fab {
+  display: flex;
+  width: 72px;
+  height: 72px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 9999px;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  box-shadow: 0 10px 24px rgb(0 0 0 / 0.28);
+}
+
+.app-nav-rail {
+  display: none;
+}
+
+@media (min-width: 640px) {
+  .app-nav-mobile {
+    display: none;
+  }
+
+  .app-nav-rail {
+    position: fixed;
+    z-index: 30;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    display: flex;
+    width: 72px;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.375rem;
+    border-right: 1px solid var(--border);
+    background: color-mix(in oklab, var(--card) 82%, transparent);
+    backdrop-filter: blur(16px) saturate(1.5);
+    padding-top: calc(0.5rem + var(--safe-area-inset-top));
+    padding-bottom: calc(0.5rem + var(--safe-area-inset-bottom));
+  }
+
+  .app-nav-rail .app-nav-item {
+    width: 56px;
+    height: 48px;
+    justify-content: center;
+    border-radius: 14px;
+  }
+
+  .app-nav-rail .app-nav-item[data-active="true"] {
+    background: var(--muted);
+  }
+}
+
 @utility scrollbar-hidden {
   scrollbar-width: none;
   &::-webkit-scrollbar {
