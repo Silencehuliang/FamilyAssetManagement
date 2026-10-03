@@ -40,7 +40,8 @@ pnpm typecheck  # TypeScript
 
 ## 部署(Cloudflare Pages)
 
-- Pages 项目:`family-ledger`,生产地址 <https://family-ledger-7ra.pages.dev>
+- Pages 项目:`family-ledger`
+- **生产地址(自定义域)**:<https://ledger.silencehl.eu.org>(备用:<https://family-ledger-7ra.pages.dev>)
 - 账本数据仓库:`Silencehuliang/family-ledger-data`(私有,JSON 纯文本)
 - 本地部署:`pnpm deploy`(需 `wrangler login`)
 - CI 自动部署:在 GitHub 仓库 Secrets 配置 `CLOUDFLARE_API_TOKEN` 与 `CLOUDFLARE_ACCOUNT_ID` 后,push 到 main 即自动部署(未配置时该任务自动跳过)
@@ -52,9 +53,9 @@ pnpm typecheck  # TypeScript
 ## 版本与发布
 
 - 版本封顶时:在最后一个功能提交上打**注解 tag**(`vX.Y.Z`)并发布 GitHub Release(标题 `家庭记账 vX.Y.Z`,说明含功能清单/部署地址/测试与验收结论)
-- 当前版本:[v1.0.0](https://github.com/Silencehuliang/FamilyAssetManagement/releases/tag/v1.0.0)(封顶提交 `00fb10e`);v1.1 开发中([spec #22](https://github.com/Silencehuliang/FamilyAssetManagement/issues/22))
+- 当前版本:[v1.1.0](https://github.com/Silencehuliang/FamilyAssetManagement/releases/tag/v1.1.0)(封顶提交 `45eed3f`)
 - 生产部署始终跟随 main 最新构建;Release 只标记版本节点,不含二进制产物
 
 ## 状态
 
-✅ v1.0.0 已发布:全部功能上线并通过真实环境端到端验收(初始化向导 → 记账 → GitHub 仓库落 JSON → 跨端同步)。工单见 [Issues](https://github.com/Silencehuliang/FamilyAssetManagement/issues)。
+✅ v1.1.0 已发布:完整记账应用 + 全面对齐 Cent 的交互与视觉(标签体系/计算器键盘编辑器/分类拖拽/首页/ECharts 统计),生产环境(自有域名)端到端验收通过。工单见 [Issues](https://github.com/Silencehuliang/FamilyAssetManagement/issues)。
