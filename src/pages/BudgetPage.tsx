@@ -18,6 +18,7 @@ import {
   resolveCategoryPath,
   todayKey,
 } from '../features/entry'
+import { errorText } from '../lib/errors'
 import type { AppController, AppState } from '../state/app-controller'
 
 interface CategoryOption {
@@ -28,11 +29,6 @@ interface CategoryOption {
 type BudgetDialogState =
   | { kind: 'total'; amountText: string }
   | { kind: 'category'; categoryId: string; amountText: string }
-
-function errorText(err: unknown): string {
-  if (err instanceof Error) return err.message
-  return '操作失败,请重试'
-}
 
 function usedPercent(spentCents: number, totalCents: number): number {
   if (totalCents <= 0) return 0

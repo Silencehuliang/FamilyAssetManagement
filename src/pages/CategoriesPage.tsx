@@ -6,7 +6,6 @@ import MdiPencilOutline from '~icons/mdi/pencil-outline'
 import MdiPlus from '~icons/mdi/plus'
 import { PopupLayout, useConfirm, useDialog } from '../components/dialog'
 import type { Category } from '../domain'
-import { DomainError } from '../domain/types'
 import {
   canManageCategories,
   categoryInUse,
@@ -14,17 +13,13 @@ import {
   countExpensesInCategory,
   migrationTargets,
 } from '../features/categories'
+import { errorText } from '../lib/errors'
 import type { AppController, AppState } from '../state/app-controller'
 
 type CategoryDialog =
   | { mode: 'add-parent' }
   | { mode: 'add-child'; parentId: string; parentName: string }
   | { mode: 'rename'; category: Category }
-
-function errorText(err: unknown): string {
-  if (err instanceof DomainError || err instanceof Error) return err.message
-  return '操作失败,请重试'
-}
 
 function dialogTitle(dialog: CategoryDialog): string {
   if (dialog.mode === 'add-parent') return '添加父分类'

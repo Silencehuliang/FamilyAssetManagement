@@ -9,6 +9,7 @@ import {
   EMPTY_FILTERS,
   type EntryFilters,
   filterExpenses,
+  formatDayLabel,
   groupByDay,
   hasActiveFilters,
   memberNameOf,
@@ -19,14 +20,6 @@ import {
 } from '../features/entries'
 import { formatCents, groupCategories, resolveCategoryPath, todayKey } from '../features/entry'
 import type { AppController, AppState } from '../state/app-controller'
-
-const WEEKDAYS = '日一二三四五六'
-
-function dayLabel(date: string): string {
-  const [, month = '', day = ''] = date.split('-')
-  const weekday = new Date(`${date}T00:00:00`).getDay()
-  return `${Number(month)}月${Number(day)}日 周${WEEKDAYS[weekday] ?? ''}`
-}
 
 /**
  * 明细页(T7):按月浏览,按日倒序分组展示日小计与月合计;
@@ -234,7 +227,7 @@ export function EntriesPage({ controller, state }: { controller: AppController; 
         groups.map((group) => (
           <section className="card" key={group.date}>
             <div className="day-header">
-              <span>{dayLabel(group.date)}</span>
+              <span>{formatDayLabel(group.date)}</span>
               <span className="day-total">{formatCents(group.totalCents)}</span>
             </div>
             <ul className="entry-list">

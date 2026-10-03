@@ -5,9 +5,9 @@ export interface SpringState {
   velocity: number
 }
 
-/** 欠阻尼弹簧参数:接近 Cent 的大字数字手感 */
+/** 轻欠阻尼弹簧:阻尼取临界阻尼(2√170≈26.1)的约 0.8 倍,保留轻微过冲的 Cent 手感 */
 export const SPRING_STIFFNESS = 170
-export const SPRING_DAMPING = 26
+export const SPRING_DAMPING = 21
 
 /** 单步积分(半隐式欧拉),dt 以秒计;纯函数,便于测试 */
 export function springStep(
@@ -27,12 +27,23 @@ export function springStep(
 /**
  * 手写 rAF 弹簧数字(不引入 motion 依赖):目标变化时从当前值弹向目标,
  * 收敛后停在目标整数上;首次挂载从 0 弹入。
+ * prefers-reduced-motion: reduce 时不做弹簧,直接跳到目标值。
  */
 export function useSpringNumber(target: number): number {
   const [display, setDisplay] = useState(0)
   const springRef = useRef<SpringState>({ value: 0, velocity: 0 })
 
   useEffect(() => {
+    const prefersReducedMotion =
+      typeof window !== 'undefined' &&
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    if (prefersReducedMotion) {
+      springRef.current = { value: target, velocity: 0 }
+      setDisplay(Math.round(target))
+      return
+    }
+
     let frame: number | null = null
     let last = performance.now()
 

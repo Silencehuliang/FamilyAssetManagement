@@ -117,6 +117,15 @@ export function groupByDay(expenses: Expense[]): DayGroupEntries[] {
   return groups
 }
 
+const WEEKDAYS = '日一二三四五六'
+
+/** 日期标签:M月D日 周X(明细页日分组头与首页非今天/昨天的日期头共用) */
+export function formatDayLabel(date: DateKey): string {
+  const [, month = '', day = ''] = date.split('-')
+  const weekday = new Date(`${date}T00:00:00`).getDay()
+  return `${Number(month)}月${Number(day)}日 周${WEEKDAYS[weekday] ?? ''}`
+}
+
 export function sumCents(expenses: Expense[]): number {
   let total = 0
   for (const expense of expenses) total += expense.amountCents

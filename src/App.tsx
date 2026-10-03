@@ -102,7 +102,8 @@ function Shell({ state }: { state: AppState }) {
         <h1>家庭记账</h1>
         <SyncBadge status={state.syncStatus} />
       </header>
-      <main className="app-main pb-[calc(5.5rem+var(--safe-area-inset-bottom))] sm:pb-8 sm:pl-[84px]">
+      {/* 竖轨补偿(≥768px 的 84px 左内边距)统一在 app.css 的 rail 媒体查询里给页头与正文加 */}
+      <main className="app-main pb-[calc(5.5rem+var(--safe-area-inset-bottom))] md:pb-8">
         <div key={view ?? route} className="page-show">
           {view === 'categories' ? (
             <CategoriesPage controller={appController} state={state} onBack={() => setView(null)} />

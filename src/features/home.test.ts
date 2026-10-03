@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { addExpense, type LedgerData, setTotalBudget } from '../domain'
 import { ADMIN, fixtureLedger, LUNCH_CATEGORY, XIAOHONG } from '../domain/fixtures'
 import {
+  activeDotIndex,
   budgetWidget,
   categoryAccent,
   homeBillGroups,
@@ -110,12 +111,54 @@ describe('homeBillGroups(账单流)', () => {
     expect(groups.map((group) => group.date)).toEqual(['2026-10-03', '2026-10-02'])
     expect(groups[0]?.totalCents).toBe(700)
     expect(groups[0]?.expenses.map((expense) => expense.amountCents)).toEqual([400, 300])
-    // limit=3 只保留最新三笔:10-03 两笔 + 10-02 的 500
-    expect(groups[1]?.totalCents).toBe(500)
+    // limit=3 只保留最新三笔:10-03 两笔 + 10-02 的 500;
+    // 但 10-02 的日小计仍按当天全部支出(200 + 500)计算
+    expect(groups[1]?.totalCents).toBe(700)
+    expect(groups[1]?.expenses.map((expense) => expense.amountCents)).toEqual([500])
+  })
+
+  it('日小计覆盖当天全部支出,不随展示截断而缩小', () => {
+    const ledger = ledgerWith([
+      { amountCents: 100, date: '2026-10-03' },
+      { amountCents: 200, date: '2026-10-03' },
+      { amountCents: 300, date: '2026-10-03' },
+      { amountCents: 400, date: '2026-10-03' },
+      { amountCents: 500, date: '2026-10-03' },
+      { amountCents: 600, date: '2026-10-02' },
+    ])
+
+    const groups = homeBillGroups(ledger, 2)
+    expect(groups).toHaveLength(1)
+    expect(groups[0]?.expenses).toHaveLength(2)
+    expect(groups[0]?.totalCents).toBe(1500)
+
+    // 未进入展示集合的日期不产出分组
+    const one = homeBillGroups(ledger, 1)
+    expect(one.map((group) => group.date)).toEqual(['2026-10-03'])
   })
 
   it('空账本返回空数组', () => {
     expect(homeBillGroups(fixtureLedger())).toEqual([])
+  })
+})
+
+describe('activeDotIndex(小组件分页圆点)', () => {
+  it('取离 rail 视口中心最近的子元素(同一坐标系)', () => {
+    const centers = [40, 320, 600]
+    expect(activeDotIndex(0, 280, centers)).toBe(0)
+    expect(activeDotIndex(180, 280, centers)).toBe(1)
+    expect(activeDotIndex(460, 280, centers)).toBe(2)
+  })
+
+  it('回归:document 空间的偏移不应参与比较(以 rail 相对偏移为准)', () => {
+    // 子元素中心相对 rail 滚动内容左缘为 16/336/656;视口中心 170
+    expect(activeDotIndex(10, 320, [16, 336, 656])).toBe(0)
+    expect(activeDotIndex(176, 320, [16, 336, 656])).toBe(1)
+  })
+
+  it('空数组回退 0,距离并列时取靠前下标', () => {
+    expect(activeDotIndex(0, 300, [])).toBe(0)
+    expect(activeDotIndex(50, 100, [0, 200])).toBe(0)
   })
 })
 

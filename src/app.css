@@ -694,6 +694,14 @@
   }
 }
 
+/* 遮罩浓度自定义属性:注册为 <number> 后才能参与过渡;
+   拖拽中由 JS 逐帧直写(transition 置 none),关闭/回弹时恢复 CSS 过渡平滑收尾 */
+@property --dialog-overlay-scale {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 1;
+}
+
 /* 对话框体系(V2):移动端右侧滑入 / ≥640px 底部滑入;遮罩为面板巨型 box-shadow */
 .dialog-layer {
   position: fixed;
@@ -715,7 +723,9 @@
   background: var(--card);
   color: var(--card-foreground);
   transform: translateX(100vw);
-  transition: transform 0.4s cubic-bezier(0.32, 0.72, 0, 1);
+  transition:
+    transform 0.4s cubic-bezier(0.32, 0.72, 0, 1),
+    --dialog-overlay-scale 0.4s cubic-bezier(0.32, 0.72, 0, 1);
   will-change: transform;
   box-shadow: 0 0 0 150vmax rgb(0 0 0 / calc(0.5 * var(--dialog-overlay-scale, 1)));
 }
@@ -730,7 +740,8 @@
   transform: translateX(100vw) scale(0.9);
   transition:
     transform 0.4s cubic-bezier(0.32, 0.72, 0, 1),
-    opacity 0.4s cubic-bezier(0.32, 0.72, 0, 1);
+    opacity 0.4s cubic-bezier(0.32, 0.72, 0, 1),
+    --dialog-overlay-scale 0.4s cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 .dialog-layer[data-nested][data-state="open"] > .dialog-panel {
@@ -823,7 +834,8 @@
   padding: 0;
 }
 
-/* 悬浮胶囊导航(V3):移动端底栏,FAB 居中(72px 轨道,左右权重 1.5:1 保证居中) */
+/* 悬浮胶囊导航(V3):<768px 一律底栏(含 640–767px 的窄桌面/横屏手机),FAB 居中;
+   ≥768px 换左侧竖轨——居中列两侧留白 ≥104px,72px 竖轨不会与列重叠 */
 .app-nav-mobile {
   position: fixed;
   z-index: 30;
@@ -875,7 +887,7 @@
   display: none;
 }
 
-@media (min-width: 640px) {
+@media (min-width: 768px) {
   .app-nav-mobile {
     display: none;
   }
@@ -908,6 +920,13 @@
   .app-nav-rail .app-nav-item[data-active="true"] {
     background: var(--muted);
   }
+
+  /* 直接列子元素(页头/正文)一致避让竖轨,保证标题与内容左缘对齐;
+     640–767px 不生效,此时是底栏布局,无需横向补偿 */
+  .app-header,
+  .app-main {
+    padding-left: 84px;
+  }
 }
 
 @utility scrollbar-hidden {
@@ -930,5 +949,18 @@
   to {
     opacity: 1;
     transform: scale(1);
+  }
+}
+
+/* 减少动态偏好:装饰性动画关闭/压缩(弹簧数字在 use-spring-number.ts 中同步处理) */
+@media (prefers-reduced-motion: reduce) {
+  .page-show {
+    animation: none;
+  }
+
+  /* 对话框滑动改为近乎瞬时(保留极短时长以兼容过渡语义) */
+  .dialog-panel,
+  .dialog-layer[data-nested] > .dialog-panel {
+    transition-duration: 0.01s;
   }
 }

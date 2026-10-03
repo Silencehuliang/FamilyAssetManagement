@@ -1,16 +1,11 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
 import type { Expense } from '../domain'
-import { DomainError } from '../domain/types'
 import { expenseToForm } from '../features/entries'
+import { errorText } from '../lib/errors'
 import type { AppController, AppState } from '../state/app-controller'
 import { PopupLayout, useConfirm } from './dialog'
 import { ExpenseForm, type ExpenseFormValues } from './ExpenseForm'
-
-function errorText(err: unknown): string {
-  if (err instanceof DomainError || err instanceof Error) return err.message
-  return '操作失败,请重试'
-}
 
 /**
  * 支出编辑对话框(明细页与首页账单流共用):保存/删除成功 toast 并关闭;

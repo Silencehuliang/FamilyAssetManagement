@@ -8,6 +8,5 @@ export {
   type ShowDialog,
   useDialog,
   useDialogControls,
-  useDialogDepth,
 } from './dialog'
 export { PopupLayout } from './popup-layout'

@@ -53,7 +53,7 @@ function NavButton({
 }
 
 /**
- * 悬浮玻璃胶囊导航(V3):移动端底栏(≥640px 换成左侧竖轨),中央 72px FAB。
+ * 悬浮玻璃胶囊导航(V3):<768px 一律底部胶囊栏(移动/窄桌面),≥768px 换成左侧竖轨,中央 72px FAB。
  * portal 到 body,避免被页面容器裁剪;safe-area 通过 --safe-area-* 消费。
  */
 export function AppNav({

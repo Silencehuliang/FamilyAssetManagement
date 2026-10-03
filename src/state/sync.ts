@@ -9,6 +9,7 @@
  */
 import { ApiError } from '../api/client'
 import { DEFAULT_CATEGORIES, type LedgerData, type Role } from '../domain'
+import { errorText } from '../lib/errors'
 import type { SyncEndpoint } from '../sync'
 import {
   type AdminFilesPolicy,
@@ -40,12 +41,6 @@ export interface SyncManagerDeps {
 
 function defaultIsOnline(): boolean {
   return typeof navigator === 'undefined' || navigator.onLine !== false
-}
-
-function errorText(err: unknown): string {
-  if (err instanceof ApiError) return err.message
-  if (err instanceof Error) return err.message
-  return '同步失败'
 }
 
 export class SyncManager {
@@ -131,7 +126,7 @@ export class SyncManager {
       this.setStatus('offline')
       return null
     }
-    this.setStatus('error', errorText(err))
+    this.setStatus('error', errorText(err, '同步失败'))
     return null
   }
 

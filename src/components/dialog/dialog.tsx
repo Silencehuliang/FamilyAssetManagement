@@ -19,8 +19,6 @@ export interface DialogOptions {
   label?: string
   /** 面板追加类名 */
   className?: string
-  /** 关闭时是否播放退场动效,默认 true */
-  animateClose?: boolean
   /** 是否允许移动端边缘拖拽关闭,默认 true */
   swipeDismiss?: boolean
 }
@@ -32,10 +30,6 @@ export type ShowDialog = <Result = void>(
   options?: DialogOptions,
 ) => Promise<Result>
 
-interface InternalControls {
-  close: (result?: unknown) => void
-}
-
 interface DialogApi {
   showDialog: ShowDialog
 }
@@ -43,15 +37,14 @@ interface DialogApi {
 interface Entry {
   id: number
   depth: number
-  render: (controls: InternalControls) => ReactNode
+  render: DialogRenderer<unknown>
   resolve: (value: unknown) => void
   options: DialogOptions
   closing: boolean
 }
 
 const DialogApiContext = createContext<DialogApi | null>(null)
-const DialogControlsContext = createContext<InternalControls | null>(null)
-const DialogDepthContext = createContext(0)
+const DialogControlsContext = createContext<DialogControls<unknown> | null>(null)
 
 /** promise 式对话框入口:showDialog(render) 返回关闭时解析的 Promise */
 export function useDialog(): DialogApi {
@@ -61,15 +54,10 @@ export function useDialog(): DialogApi {
 }
 
 /** 当前最近一层对话框的关闭句柄(PopupLayout 与内容组件使用) */
-export function useDialogControls(): InternalControls {
+export function useDialogControls(): DialogControls<unknown> {
   const context = useContext(DialogControlsContext)
   if (!context) throw new Error('useDialogControls 必须在对话框内使用')
   return context
-}
-
-/** 0 为最外层;嵌套层播放 fade + scale(0.9) */
-export function useDialogDepth(): number {
-  return useContext(DialogDepthContext)
 }
 
 export const DIALOG_CLOSE_ANIMATION_MS = 400
@@ -99,7 +87,7 @@ export function DialogProvider({ children }: { children: ReactNode }) {
         const entry: Entry = {
           id,
           depth: entriesRef.current.length,
-          render: render as (controls: InternalControls) => ReactNode,
+          render,
           resolve: resolve as (value: unknown) => void,
           options,
           closing: false,
@@ -116,10 +104,6 @@ export function DialogProvider({ children }: { children: ReactNode }) {
       const entry = current.find((item) => item.id === id)
       if (!entry || entry.closing) return
       entry.resolve(value)
-      if (entry.options.animateClose === false) {
-        commit(current.filter((item) => item.id !== id))
-        return
-      }
       commit(current.map((item) => (item.id === id ? { ...item, closing: true } : item)))
       window.setTimeout(() => {
         commit(entriesRef.current.filter((item) => item.id !== id))
@@ -181,7 +165,7 @@ function DialogHost({
     return () => window.cancelAnimationFrame(raf)
   }, [])
 
-  const controls = useMemo<InternalControls>(
+  const controls = useMemo<DialogControls<unknown>>(
     () => ({ close: (result?: unknown) => onClose(entry.id, result) }),
     [entry.id, onClose],
   )
@@ -199,9 +183,11 @@ function DialogHost({
 
   const canSwipe = entry.options.swipeDismiss !== false
 
-  /** 移动端边缘拖拽返回:起始 clientX < 50 才接管 */
+  /** 移动端边缘拖拽返回:起始 clientX < 50 才接管;拖拽中忽略新的 pointerdown */
   const onPointerDown = (event: React.PointerEvent<HTMLDivElement>): void => {
+    if (dragRef.current) return
     if (!canSwipe || event.pointerType === 'mouse') return
+    // 与 CSS 一致:≥640px 是底部滑入布局,右侧边缘拖拽仅移动端(右滑布局)生效
     if (window.innerWidth >= 640) return
     if (event.clientX >= 50) return
     const panel = panelRef.current
@@ -237,7 +223,8 @@ function DialogHost({
     const velocity = drag.dx / elapsed
     const shouldClose = drag.dx > panel.offsetWidth / 2 || velocity > 0.5
     if (shouldClose) {
-      panel.style.transition = 'transform 0.4s cubic-bezier(0.32, 0.72, 0, 1)'
+      // 恢复 CSS 过渡(含 --dialog-overlay-scale),让面板滑出与遮罩变淡一起平滑收尾
+      panel.style.transition = ''
       panel.style.transform = 'translateX(100%)'
       panel.style.setProperty('--dialog-overlay-scale', '0')
       onClose(entry.id, undefined)
@@ -267,9 +254,7 @@ function DialogHost({
         onPointerCancel={finishDrag}
       >
         <DialogControlsContext.Provider value={controls}>
-          <DialogDepthContext.Provider value={entry.depth}>
-            {entry.render(controls)}
-          </DialogDepthContext.Provider>
+          {entry.render(controls)}
         </DialogControlsContext.Provider>
       </div>
     </div>

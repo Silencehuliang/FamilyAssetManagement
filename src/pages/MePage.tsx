@@ -12,12 +12,8 @@ import MdiThemeLightDark from '~icons/mdi/theme-light-dark'
 import { PopupLayout, useDialog } from '../components/dialog'
 import { SYNC_LABELS } from '../components/SyncBadge'
 import { type ThemeChoice, useTheme } from '../components/theme'
+import { errorText } from '../lib/errors'
 import type { AppController, AppState } from '../state/app-controller'
-
-function errorText(err: unknown): string {
-  if (err instanceof Error) return err.message
-  return '操作失败,请重试'
-}
 
 const THEME_OPTIONS: { value: ThemeChoice; label: string }[] = [
   { value: 'system', label: '跟随系统' },

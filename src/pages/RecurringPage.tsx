@@ -15,7 +15,6 @@ import {
   nextDueDate,
   type RecurringExpense,
 } from '../domain'
-import { DomainError } from '../domain/types'
 import { formatAmountInput } from '../features/entries'
 import {
   formatCents,
@@ -24,6 +23,7 @@ import {
   resolveCategoryPath,
   todayKey,
 } from '../features/entry'
+import { errorText } from '../lib/errors'
 import type { AppController, AppState } from '../state/app-controller'
 
 interface RuleForm {
@@ -35,11 +35,6 @@ interface RuleForm {
   endDate: string
   note: string
   memberId: string
-}
-
-function errorText(err: unknown): string {
-  if (err instanceof DomainError || err instanceof Error) return err.message
-  return '操作失败,请重试'
 }
 
 function ruleToForm(ledger: AppState['ledger'], rule: RecurringExpense): RuleForm {

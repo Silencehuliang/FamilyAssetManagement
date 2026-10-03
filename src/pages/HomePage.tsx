@@ -8,6 +8,7 @@ import type { Expense } from '../domain'
 import { canEditEntry, memberNameOf } from '../features/entries'
 import { formatCents, resolveCategoryName, todayKey } from '../features/entry'
 import {
+  activeDotIndex,
   budgetWidget,
   categoryAccent,
   homeBillGroups,
@@ -15,24 +16,8 @@ import {
   homeDonut,
   homeSummary,
 } from '../features/home'
-import type { CategorySlice } from '../features/stats'
+import { type CategorySlice, chartColor } from '../features/stats'
 import type { AppController, AppState } from '../state/app-controller'
-
-/** 图表色板(与统计页共用 CSS 令牌) */
-const SLICE_COLORS = [
-  'var(--chart-1)',
-  'var(--chart-2)',
-  'var(--chart-3)',
-  'var(--chart-4)',
-  'var(--chart-5)',
-  'var(--chart-6)',
-  'var(--chart-7)',
-  'var(--chart-8)',
-]
-
-function sliceColor(index: number): string {
-  return SLICE_COLORS[index % SLICE_COLORS.length] ?? 'var(--tag-gray)'
-}
 
 const WIDGET_CLASS =
   'flex min-h-[100px] w-full flex-shrink-0 snap-center flex-col rounded-lg border border-border bg-card p-4 text-left'
@@ -72,18 +57,15 @@ export function HomePage({
   const syncActive = useCallback(() => {
     const rail = railRef.current
     if (!rail) return
-    const center = rail.scrollLeft + rail.clientWidth / 2
-    let best = 0
-    let bestDistance = Number.POSITIVE_INFINITY
-    Array.from(rail.children).forEach((child, index) => {
-      const element = child as HTMLElement
-      const distance = Math.abs(element.offsetLeft + element.offsetWidth / 2 - center)
-      if (distance < bestDistance) {
-        bestDistance = distance
-        best = index
-      }
+    // 全部换到 rail 滚动坐标系:子元素中心 = rect 中心 - rail 左缘 + scrollLeft,
+    // 避免 offsetLeft(document 空间)与 scrollLeft(元素空间)混用
+    const railRect = rail.getBoundingClientRect()
+    const centers = Array.from(rail.children).map((child) => {
+      const rect = child.getBoundingClientRect()
+      return rect.left + rect.width / 2 - railRect.left + rail.scrollLeft
     })
-    setActiveWidget((current) => (current === best ? current : best))
+    const next = activeDotIndex(rail.scrollLeft, rail.clientWidth, centers)
+    setActiveWidget((current) => (current === next ? current : next))
   }, [])
 
   // scrollend 事件在不支持的浏览器里静默跳过,onScroll 兜底
@@ -114,7 +96,9 @@ export function HomePage({
       {/* 1. 今日卡 */}
       <section className="min-h-20 rounded-lg bg-stone-800 p-4 text-stone-50">
         <div className="flex items-center justify-between text-xs opacity-80">
-          <span>{homeDayLabel(today, today)}</span>
+          <span>
+            {homeDayLabel(today, today)} · {today.slice(5)}
+          </span>
           <span>
             {state.member?.displayName ?? '家庭'} 的账本 · 今日 {summary.todayCount} 笔
           </span>
@@ -185,7 +169,7 @@ export function HomePage({
                     <span key={slice.id} className="flex items-center gap-1.5 text-xs">
                       <span
                         className="size-2 shrink-0 rounded-sm"
-                        style={{ background: sliceColor(index) }}
+                        style={{ background: chartColor(index) }}
                         aria-hidden="true"
                       />
                       <span className="truncate">{slice.name}</span>
@@ -328,7 +312,7 @@ function MiniDonut({ slices, totalCents }: { slices: CategorySlice[]; totalCents
             cy={center}
             r={radius}
             fill="none"
-            stroke={sliceColor(index)}
+            stroke={chartColor(index)}
             strokeWidth={strokeWidth}
             strokeDasharray={`${length} ${circumference - length}`}
             strokeDashoffset={dashOffset}

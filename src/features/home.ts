@@ -10,7 +10,7 @@ import {
   type LedgerData,
   type MonthKey,
 } from '../domain'
-import { type DayGroupEntries, groupByDay } from './entries'
+import { type DayGroupEntries, formatDayLabel, groupByDay } from './entries'
 import { type CategorySlice, categoryShare } from './stats'
 
 export interface HomeSummary {
@@ -61,7 +61,10 @@ export function budgetWidget(ledger: LedgerData, month: MonthKey): BudgetWidget 
 /** 账单流默认条数上限(避免长账本一次性渲染) */
 export const HOME_BILL_LIMIT = 100
 
-/** 账单流:全部月份合并后按日期倒序(同日按记录时间、id 兜底),截断后按日分组 */
+/**
+ * 账单流:全部月份合并后按日期倒序(同日按记录时间、id 兜底),截断后按日分组。
+ * 展示行受 limit 截断,但每组的日小计始终按当天全部支出计算(截断只影响列出的行)。
+ */
 export function homeBillGroups(ledger: LedgerData, limit = HOME_BILL_LIMIT): DayGroupEntries[] {
   const all = Object.values(ledger.months).flatMap((month) => month.expenses)
   all.sort((a, b) => {
@@ -69,18 +72,48 @@ export function homeBillGroups(ledger: LedgerData, limit = HOME_BILL_LIMIT): Day
     if (a.createdAt !== b.createdAt) return a.createdAt < b.createdAt ? 1 : -1
     return a.id < b.id ? -1 : a.id > b.id ? 1 : 0
   })
-  return groupByDay(all.slice(0, Math.max(0, limit)))
+  const groups = groupByDay(all.slice(0, Math.max(0, limit)))
+  const totalByDate = new Map<DateKey, number>()
+  for (const expense of all) {
+    totalByDate.set(expense.date, (totalByDate.get(expense.date) ?? 0) + expense.amountCents)
+  }
+  return groups.map((group) => ({
+    ...group,
+    totalCents: totalByDate.get(group.date) ?? group.totalCents,
+  }))
 }
 
-const WEEKDAYS = '日一二三四五六'
-
-/** 日期标签:今天 / 昨天 / M月D日 周X(用于吸顶日期头与今日卡) */
+/**
+ * 日期标签:今天 / 昨天 / M月D日 周X(用于吸顶日期头与今日卡);
+ * 与明细页共用 formatDayLabel,仅额外识别今天/昨天。
+ */
 export function homeDayLabel(date: DateKey, today: DateKey): string {
   if (date === today) return '今天'
   if (date === previousDay(today)) return '昨天'
-  const [, month = '', day = ''] = date.split('-')
-  const weekday = new Date(`${date}T00:00:00`).getDay()
-  return `${Number(month)}月${Number(day)}日 周${WEEKDAYS[weekday] ?? ''}`
+  return formatDayLabel(date)
+}
+
+/**
+ * 小组件分页圆点:取离 rail 视口中心最近的子元素下标。
+ * railScrollLeft/clientWidth 与每个子元素中心偏移必须处于同一坐标系
+ * (相对 rail 滚动内容左缘),空数组回退 0;距离并列时取靠前的下标。
+ */
+export function activeDotIndex(
+  railScrollLeft: number,
+  railClientWidth: number,
+  childOffsetsRelativeToRail: readonly number[],
+): number {
+  const center = railScrollLeft + railClientWidth / 2
+  let best = 0
+  let bestDistance = Number.POSITIVE_INFINITY
+  childOffsetsRelativeToRail.forEach((offset, index) => {
+    const distance = Math.abs(offset - center)
+    if (distance < bestDistance) {
+      bestDistance = distance
+      best = index
+    }
+  })
+  return best
 }
 
 function previousDay(date: DateKey): DateKey {

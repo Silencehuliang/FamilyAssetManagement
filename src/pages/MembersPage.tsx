@@ -7,7 +7,7 @@ import MdiArrowLeft from '~icons/mdi/arrow-left'
 import MdiLockReset from '~icons/mdi/lock-reset'
 import { PopupLayout, useConfirm, useDialog } from '../components/dialog'
 import type { Member } from '../domain'
-import { DomainError } from '../domain/types'
+import { errorText } from '../lib/errors'
 import type { AppController, AppState } from '../state/app-controller'
 
 interface CreateForm {
@@ -17,11 +17,6 @@ interface CreateForm {
 }
 
 const EMPTY_CREATE: CreateForm = { username: '', displayName: '', password: '' }
-
-function errorText(err: unknown): string {
-  if (err instanceof DomainError || err instanceof Error) return err.message
-  return '操作失败,请重试'
-}
 
 /**
  * 成员管理(T9,仅管理员):创建成员、停用/启用、重置密码。

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { SPRING_DAMPING, SPRING_STIFFNESS, type SpringState, springStep } from './use-spring-number'
 
 describe('springStep(弹簧积分)', () => {
-  it('从 0 向目标收敛且不越过目标过远', () => {
+  it('欠阻尼:从 0 向目标收敛,存在轻微过冲但不越过目标过远', () => {
     let state: SpringState = { value: 0, velocity: 0 }
     let maxOvershoot = 0
     for (let i = 0; i < 240; i += 1) {
@@ -11,7 +11,9 @@ describe('springStep(弹簧积分)', () => {
     }
     expect(Math.abs(state.value - 100)).toBeLessThan(0.01)
     expect(state.velocity).toBeLessThan(0.01)
-    expect(maxOvershoot).toBeLessThan(25)
+    // 阻尼 21 < 临界阻尼 2√170≈26.1:过冲真实存在(≈0.2%,60fps 半步欧拉)
+    expect(maxOvershoot).toBeGreaterThan(0)
+    expect(maxOvershoot).toBeLessThan(5)
   })
 
   it('dt 钳制在 1/30 秒,避免后台标签页恢复时跳变', () => {
