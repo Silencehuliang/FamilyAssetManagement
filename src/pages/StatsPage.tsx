@@ -440,7 +440,7 @@ export function StatsPage({
                             <button
                               type="button"
                               className="tag-detail-row"
-                              onClick={() => onOpenEntries?.({ tag: row.name })}
+                              onClick={() => onOpenEntries?.({ tagIds: [row.tagId] })}
                               disabled={!onOpenEntries}
                             >
                               <span className="min-w-0 flex-1 truncate">#{row.name}</span>

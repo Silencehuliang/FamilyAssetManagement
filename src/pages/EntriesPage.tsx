@@ -17,7 +17,8 @@ import {
   monthOptions,
   shiftMonth,
   sumCents,
-  tagsOfMonth,
+  type TagFilterGroup,
+  tagFilterGroups,
 } from '../features/entries'
 import { formatCents, groupCategories, resolveCategoryPath, todayKey } from '../features/entry'
 import type { AppController, AppState } from '../state/app-controller'
@@ -49,7 +50,7 @@ export function EntriesPage({
   const visible = filterExpenses(ledger, monthExpenses, filters)
   const groups = groupByDay(ledger, visible)
   const options = monthOptions(ledger, month, currentMonth)
-  const tags = tagsOfMonth(ledger, month)
+  const filterTagGroups = tagFilterGroups(ledger, month)
   const { parents, childrenByParent } = groupCategories(ledger.meta.categories)
   const children = filters.parentId ? (childrenByParent[filters.parentId] ?? []) : []
   const filtering = hasActiveFilters(filters)
@@ -73,7 +74,16 @@ export function EntriesPage({
   /** 切月:标签选项按月生成,切月时清掉已选标签避免悬空 */
   const changeMonth = (next: string): void => {
     setMonth(next)
-    setFilters((current) => (current.tag === '' ? current : { ...current, tag: '' }))
+    setFilters((current) => (current.tagIds.length === 0 ? current : { ...current, tagIds: [] }))
+  }
+
+  const toggleTag = (id: string): void => {
+    setFilters((current) => ({
+      ...current,
+      tagIds: current.tagIds.includes(id)
+        ? current.tagIds.filter((tagId) => tagId !== id)
+        : [...current.tagIds, id],
+    }))
   }
 
   return (
@@ -189,21 +199,44 @@ export function EntriesPage({
           </select>
         </label>
 
-        {tags.length > 0 ? (
-          <label className="field">
-            <span>标签</span>
-            <select
-              value={filters.tag}
-              onChange={(event) => setFilters((f) => ({ ...f, tag: event.target.value }))}
-            >
-              <option value="">全部标签</option>
-              {tags.map((tag) => (
-                <option key={tag} value={tag}>
-                  {tag}
-                </option>
-              ))}
-            </select>
-          </label>
+        {filterTagGroups.length > 0 ? (
+          <div className="tag-filter">
+            <div className="tag-filter-head">
+              <span className="text-[13px] text-muted-foreground">标签</span>
+              <div className="chip-row">
+                <button
+                  type="button"
+                  className={`chip ${filters.tagMode === 'include' ? 'chip-active' : ''}`}
+                  aria-pressed={filters.tagMode === 'include'}
+                  onClick={() => setFilters((f) => ({ ...f, tagMode: 'include' }))}
+                >
+                  包含
+                </button>
+                <button
+                  type="button"
+                  className={`chip ${filters.tagMode === 'exclude' ? 'chip-active' : ''}`}
+                  aria-pressed={filters.tagMode === 'exclude'}
+                  onClick={() => setFilters((f) => ({ ...f, tagMode: 'exclude' }))}
+                >
+                  排除
+                </button>
+              </div>
+            </div>
+            {filterTagGroups.map((group) => (
+              <TagGroupFilter
+                key={group.id}
+                group={group}
+                selectedIds={filters.tagIds}
+                onToggle={toggleTag}
+              />
+            ))}
+            {filters.tagIds.length > 0 ? (
+              <p className="member-meta">
+                已选 {filters.tagIds.length} 个标签 ·{' '}
+                {filters.tagMode === 'include' ? '含任一选中标签' : '剔除带任一选中标签的支出'}
+              </p>
+            ) : null}
+          </div>
         ) : null}
 
         <label className="field">
@@ -264,11 +297,14 @@ export function EntriesPage({
                         {memberNameOf(ledger, expense.memberId)}
                         {expense.note ? ` · ${expense.note}` : ''}
                       </span>
-                      {expense.tagNames.length > 0 ? (
+                      {expense.tagChips.length > 0 ? (
                         <span className="entry-tags">
-                          {expense.tagNames.map((tag) => (
-                            <span key={tag} className="entry-tag">
-                              #{tag}
+                          {expense.tagChips.map((chip) => (
+                            <span
+                              key={chip.id}
+                              className={`entry-tag ${chip.color ? `entry-tag-${chip.color}` : ''}`}
+                            >
+                              #{chip.name}
                             </span>
                           ))}
                         </span>
@@ -283,5 +319,52 @@ export function EntriesPage({
         ))
       )}
     </div>
+  )
+}
+
+/** 按标签组折叠展示的筛选 chips(V10):组色圆点 + 组内多选,默认展开 */
+function TagGroupFilter({
+  group,
+  selectedIds,
+  onToggle,
+}: {
+  group: TagFilterGroup
+  selectedIds: string[]
+  onToggle: (id: string) => void
+}) {
+  const [open, setOpen] = useState(true)
+  const selected = group.tags.filter((tag) => selectedIds.includes(tag.id)).length
+
+  return (
+    <details
+      className="tag-filter-group"
+      open={open}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary>
+        {group.color ? (
+          <span
+            className="legend-dot"
+            style={{ background: `var(--tag-${group.color})` }}
+            aria-hidden="true"
+          />
+        ) : null}
+        <span className="min-w-0 flex-1 truncate">{group.name}</span>
+        {selected > 0 ? <span className="text-muted-foreground">已选 {selected}</span> : null}
+      </summary>
+      <div className="chip-row">
+        {group.tags.map((tag) => (
+          <button
+            key={tag.id}
+            type="button"
+            className={`chip ${selectedIds.includes(tag.id) ? 'chip-active' : ''}`}
+            aria-pressed={selectedIds.includes(tag.id)}
+            onClick={() => onToggle(tag.id)}
+          >
+            #{tag.name}
+          </button>
+        ))}
+      </div>
+    </details>
   )
 }

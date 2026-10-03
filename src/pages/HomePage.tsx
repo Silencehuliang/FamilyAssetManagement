@@ -236,9 +236,14 @@ export function HomePage({
                             <span className="truncate text-sm font-medium">
                               {resolveCategoryName(ledger, expense.categoryId)}
                             </span>
-                            {resolveExpenseTagNames(ledger, expense).map((tag) => (
-                              <span key={tag} className="entry-tag">
-                                #{tag}
+
+                            {expense.tagChips.map((chip) => (
+                              <span
+                                key={chip.id}
+                                className={`entry-tag ${chip.color ? `entry-tag-${chip.color}` : ''}`}
+                              >
+                                #{chip.name}
+ (feat: 明细分组标签筛选+行内组色 chips (#32))
                               </span>
                             ))}
                           </span>

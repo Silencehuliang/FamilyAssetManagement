@@ -456,6 +456,67 @@
     @apply rounded-full bg-muted px-2 py-px text-[11px] text-muted-foreground;
   }
 
+  /* 行内标签 chip 组色(V10):浅色底 + 组色文字,与标签组色板一致 */
+  .entry-tag-red {
+    background: color-mix(in srgb, var(--tag-red) 16%, transparent);
+    color: var(--tag-red);
+  }
+
+  .entry-tag-orange {
+    background: color-mix(in srgb, var(--tag-orange) 16%, transparent);
+    color: var(--tag-orange);
+  }
+
+  .entry-tag-yellow {
+    background: color-mix(in srgb, var(--tag-yellow) 18%, transparent);
+    color: var(--tag-yellow);
+  }
+
+  .entry-tag-green {
+    background: color-mix(in srgb, var(--tag-green) 16%, transparent);
+    color: var(--tag-green);
+  }
+
+  .entry-tag-blue {
+    background: color-mix(in srgb, var(--tag-blue) 16%, transparent);
+    color: var(--tag-blue);
+  }
+
+  .entry-tag-purple {
+    background: color-mix(in srgb, var(--tag-purple) 16%, transparent);
+    color: var(--tag-purple);
+  }
+
+  .entry-tag-gray {
+    background: color-mix(in srgb, var(--tag-gray) 16%, transparent);
+    color: var(--tag-gray);
+  }
+
+  /* 标签筛选(V10):按组折叠 + 包含/排除 */
+  .tag-filter {
+    @apply mt-3;
+  }
+
+  .tag-filter-head {
+    @apply flex items-center justify-between gap-2;
+  }
+
+  .tag-filter-group {
+    @apply mt-2 border-t border-border pt-2;
+  }
+
+  .tag-filter-group summary {
+    @apply flex cursor-pointer list-none items-center gap-1.5 text-[13px] text-muted-foreground;
+  }
+
+  .tag-filter-group summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .tag-filter-group .chip-row {
+    @apply mt-2;
+  }
+
   .entry-amount {
     @apply shrink-0 text-[15px] font-semibold tabular-nums;
   }
