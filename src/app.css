@@ -460,28 +460,6 @@
     @apply shrink-0 text-[15px] font-semibold tabular-nums;
   }
 
-  /* 旧弹层(V1 过渡;V2 起由 promise 对话框体系接管) */
-  .sheet-backdrop {
-    @apply fixed inset-0 z-20 flex items-end justify-center bg-black/50 p-4;
-    padding-bottom: calc(1rem + var(--safe-area-inset-bottom));
-  }
-
-  .sheet {
-    @apply max-h-[88vh] w-full max-w-[520px] overflow-y-auto rounded-lg border border-border bg-card p-4;
-  }
-
-  .sheet-header {
-    @apply flex items-center justify-between;
-  }
-
-  .sheet-close {
-    @apply mt-0 w-auto text-[13px];
-  }
-
-  .sheet .card {
-    @apply border-0 bg-transparent p-0;
-  }
-
   /* 分类管理 */
   .back-button {
     @apply mt-0 w-auto p-0 text-left;
@@ -714,6 +692,135 @@
   .recurring-actions {
     @apply flex-wrap justify-end;
   }
+}
+
+/* 对话框体系(V2):移动端右侧滑入 / ≥640px 底部滑入;遮罩为面板巨型 box-shadow */
+.dialog-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.dialog-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  background: var(--card);
+  color: var(--card-foreground);
+  transform: translateX(100vw);
+  transition: transform 0.4s cubic-bezier(0.32, 0.72, 0, 1);
+  will-change: transform;
+  box-shadow: 0 0 0 150vmax rgb(0 0 0 / calc(0.5 * var(--dialog-overlay-scale, 1)));
+}
+
+.dialog-layer[data-state="open"] > .dialog-panel {
+  transform: translateX(0);
+}
+
+/* 嵌套对话框:淡入 + scale(.9),不重复滑入 */
+.dialog-layer[data-nested] > .dialog-panel {
+  opacity: 0;
+  transform: translateX(100vw) scale(0.9);
+  transition:
+    transform 0.4s cubic-bezier(0.32, 0.72, 0, 1),
+    opacity 0.4s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.dialog-layer[data-nested][data-state="open"] > .dialog-panel {
+  opacity: 1;
+  transform: translateX(0) scale(1);
+}
+
+@media (min-width: 640px) {
+  .dialog-layer {
+    align-items: flex-end;
+    justify-content: center;
+  }
+
+  .dialog-panel {
+    height: auto;
+    max-height: 88vh;
+    max-width: 520px;
+    border-top-left-radius: var(--radius-xl);
+    border-top-right-radius: var(--radius-xl);
+    transform: translateY(100vh);
+  }
+
+  .dialog-layer[data-state="open"] > .dialog-panel {
+    transform: translateY(0);
+  }
+
+  .dialog-layer[data-nested] > .dialog-panel {
+    transform: translateY(1.5rem) scale(0.9);
+  }
+
+  .dialog-layer[data-nested][data-state="open"] > .dialog-panel {
+    transform: translateY(0) scale(1);
+  }
+}
+
+.dialog-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+.dialog-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in oklab, var(--card) 88%, transparent);
+  backdrop-filter: blur(12px);
+  padding: calc(0.25rem + var(--safe-area-inset-top)) 0.5rem 0.5rem;
+}
+
+.dialog-header-button {
+  display: flex;
+  width: 2.25rem;
+  height: 2.25rem;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 9999px;
+  background: transparent;
+  color: var(--foreground);
+}
+
+.dialog-header-title {
+  flex: 1;
+  margin: 0;
+  text-align: center;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.dialog-header-spacer {
+  width: 2.25rem;
+}
+
+.dialog-content {
+  flex: 1;
+  padding: 1rem;
+  padding-bottom: calc(1rem + var(--safe-area-inset-bottom));
+}
+
+/* 对话框里的表单不再叠加卡片外观 */
+.dialog-content .card {
+  border: 0;
+  background: transparent;
+  padding: 0;
 }
 
 @utility scrollbar-hidden {

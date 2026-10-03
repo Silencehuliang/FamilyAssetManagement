@@ -1,20 +1,18 @@
 import type { ComponentType } from 'react'
 import { useState } from 'react'
+import { toast } from 'sonner'
 import MdiAccountGroupOutline from '~icons/mdi/account-group-outline'
 import MdiCalendarSyncOutline from '~icons/mdi/calendar-sync-outline'
 import MdiChevronRight from '~icons/mdi/chevron-right'
 import MdiCogOutline from '~icons/mdi/cog-outline'
+import MdiLockOutline from '~icons/mdi/lock-outline'
 import MdiLogoutVariant from '~icons/mdi/logout-variant'
 import MdiShapeOutline from '~icons/mdi/shape-outline'
 import MdiThemeLightDark from '~icons/mdi/theme-light-dark'
+import { PopupLayout, useDialog } from '../components/dialog'
 import { SYNC_LABELS } from '../components/SyncBadge'
 import { type ThemeChoice, useTheme } from '../components/theme'
 import type { AppController, AppState } from '../state/app-controller'
-
-interface Feedback {
-  kind: 'ok' | 'error'
-  text: string
-}
 
 function errorText(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -50,7 +48,7 @@ function SettingRow({
 }
 
 /**
- * 我的(T13 打磨):当前成员、分类/成员/周期支出入口、修改密码弹层;
+ * 我的(T13 打磨):当前成员、分类/成员/周期支出入口、修改密码对话框、主题切换;
  * 同步状态区分「离线(本地已保存,联网自动同步)」「失败(展示错误 + 重试)」「已同步」。
  */
 export function MePage({
@@ -68,46 +66,16 @@ export function MePage({
 }) {
   const member = state.member
   const { theme, setTheme } = useTheme()
-  const [passwordOpen, setPasswordOpen] = useState(false)
-  const [currentPassword, setCurrentPassword] = useState('')
-  const [newPassword, setNewPassword] = useState('')
-  const [confirmPassword, setConfirmPassword] = useState('')
-  const [passwordFeedback, setPasswordFeedback] = useState<Feedback | null>(null)
-  const [notice, setNotice] = useState<Feedback | null>(null)
-  const [busy, setBusy] = useState(false)
+  const { showDialog } = useDialog()
 
-  const openPasswordSheet = (): void => {
-    setPasswordOpen(true)
-    setCurrentPassword('')
-    setNewPassword('')
-    setConfirmPassword('')
-    setPasswordFeedback(null)
+  const openPassword = (): void => {
+    void showDialog<void>(
+      ({ close }) => (
+        <ChangePasswordDialog controller={controller} onClose={() => close(undefined)} />
+      ),
+      { label: '修改密码' },
+    )
   }
-
-  const submitPassword = (): void => {
-    if (newPassword !== confirmPassword) {
-      setPasswordFeedback({ kind: 'error', text: '两次输入的新密码不一致' })
-      return
-    }
-    setBusy(true)
-    setPasswordFeedback(null)
-    void controller
-      .changePassword(currentPassword, newPassword)
-      .then(() => {
-        setPasswordOpen(false)
-        setNotice({ kind: 'ok', text: '密码已修改,下次登录请使用新密码' })
-      })
-      .catch((err: unknown) => {
-        // 当前密码错误等由服务端返回可读文案(401 wrong_password 不会退出登录)
-        setPasswordFeedback({ kind: 'error', text: errorText(err) })
-      })
-      .finally(() => {
-        setBusy(false)
-      })
-  }
-
-  const canSubmitPassword =
-    currentPassword !== '' && newPassword !== '' && confirmPassword !== '' && !busy
 
   return (
     <div className="page">
@@ -117,14 +85,15 @@ export function MePage({
         <p className="member-meta">
           @{member?.username} · {member?.role === 'admin' ? '管理员' : '成员'}
         </p>
-        <button type="button" className="primary-button" onClick={openPasswordSheet}>
+        <button
+          type="button"
+          className="primary-button inline-flex items-center justify-center gap-1.5"
+          onClick={openPassword}
+        >
+          <MdiLockOutline className="size-4" />
           修改密码
         </button>
       </section>
-
-      {notice ? (
-        <p className={notice.kind === 'ok' ? 'form-success' : 'form-error'}>{notice.text}</p>
-      ) : null}
 
       <section className="card">
         <h2 className="card-title flex items-center gap-1.5">
@@ -141,7 +110,10 @@ export function MePage({
       </section>
 
       <section className="card">
-        <h2 className="card-title">外观</h2>
+        <h2 className="card-title flex items-center gap-1.5">
+          <MdiThemeLightDark className="size-4" />
+          外观
+        </h2>
         <div className="chip-row">
           {THEME_OPTIONS.map((option) => (
             <button
@@ -155,10 +127,7 @@ export function MePage({
             </button>
           ))}
         </div>
-        <p className="member-meta flex items-center gap-1">
-          <MdiThemeLightDark className="size-4" />
-          深色模式跟随 .dark class,改动即时生效。
-        </p>
+        <p className="member-meta">深色模式随 .dark class 即时切换,选择会保存在本机。</p>
       </section>
 
       <section className="card">
@@ -200,63 +169,80 @@ export function MePage({
           退出登录
         </button>
       </section>
-
-      {passwordOpen ? (
-        <div className="sheet-backdrop">
-          <section className="sheet" aria-label="修改密码">
-            <div className="sheet-header">
-              <h2 className="card-title">修改密码</h2>
-              <button
-                type="button"
-                className="link-button sheet-close"
-                onClick={() => setPasswordOpen(false)}
-              >
-                关闭
-              </button>
-            </div>
-            <label className="field">
-              <span>当前密码</span>
-              <input
-                type="password"
-                autoComplete="current-password"
-                value={currentPassword}
-                onChange={(event) => setCurrentPassword(event.target.value)}
-              />
-            </label>
-            <label className="field">
-              <span>新密码</span>
-              <input
-                type="password"
-                autoComplete="new-password"
-                value={newPassword}
-                onChange={(event) => setNewPassword(event.target.value)}
-              />
-            </label>
-            <label className="field">
-              <span>确认新密码</span>
-              <input
-                type="password"
-                autoComplete="new-password"
-                value={confirmPassword}
-                onChange={(event) => setConfirmPassword(event.target.value)}
-              />
-            </label>
-            {passwordFeedback ? (
-              <p className={passwordFeedback.kind === 'ok' ? 'form-success' : 'form-error'}>
-                {passwordFeedback.text}
-              </p>
-            ) : null}
-            <button
-              type="button"
-              className="primary-button"
-              disabled={!canSubmitPassword}
-              onClick={submitPassword}
-            >
-              {busy ? '提交中…' : '确认修改'}
-            </button>
-          </section>
-        </div>
-      ) : null}
     </div>
+  )
+}
+
+/** 修改密码对话框:成功后 toast,失败留在框内继续改 */
+function ChangePasswordDialog({
+  controller,
+  onClose,
+}: {
+  controller: AppController
+  onClose: () => void
+}) {
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const canSubmit = currentPassword !== '' && newPassword !== '' && confirmPassword !== '' && !busy
+
+  const submit = (): void => {
+    if (newPassword !== confirmPassword) {
+      toast.error('两次输入的新密码不一致')
+      return
+    }
+    setBusy(true)
+    void controller
+      .changePassword(currentPassword, newPassword)
+      .then(() => {
+        toast.success('密码已修改,下次登录请使用新密码')
+        onClose()
+      })
+      .catch((err: unknown) => {
+        // 当前密码错误等由服务端返回可读文案(401 wrong_password 不会退出登录)
+        toast.error(errorText(err))
+      })
+      .finally(() => {
+        setBusy(false)
+      })
+  }
+
+  return (
+    <PopupLayout title="修改密码">
+      <label className="field">
+        <span>当前密码</span>
+        <input
+          // biome-ignore lint/a11y/noAutofocus: 对话框唯一主输入,自动聚焦是刻意行为
+          autoFocus
+          type="password"
+          autoComplete="current-password"
+          value={currentPassword}
+          onChange={(event) => setCurrentPassword(event.target.value)}
+        />
+      </label>
+      <label className="field">
+        <span>新密码</span>
+        <input
+          type="password"
+          autoComplete="new-password"
+          value={newPassword}
+          onChange={(event) => setNewPassword(event.target.value)}
+        />
+      </label>
+      <label className="field">
+        <span>确认新密码</span>
+        <input
+          type="password"
+          autoComplete="new-password"
+          value={confirmPassword}
+          onChange={(event) => setConfirmPassword(event.target.value)}
+        />
+      </label>
+      <button type="button" className="primary-button" disabled={!canSubmit} onClick={submit}>
+        {busy ? '提交中…' : '确认修改'}
+      </button>
+    </PopupLayout>
   )
 }

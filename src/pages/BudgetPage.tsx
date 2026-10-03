@@ -1,7 +1,15 @@
 import { useState } from 'react'
+import { toast } from 'sonner'
 import MdiChevronLeft from '~icons/mdi/chevron-left'
 import MdiChevronRight from '~icons/mdi/chevron-right'
-import { aggregateMonth, budgetHistory, budgetOutcome, budgetProgress } from '../domain'
+import { PopupLayout, useConfirm, useDialog } from '../components/dialog'
+import {
+  aggregateMonth,
+  type Budget,
+  budgetHistory,
+  budgetOutcome,
+  budgetProgress,
+} from '../domain'
 import { formatAmountInput, formatMonthLabel, shiftMonth } from '../features/entries'
 import {
   formatCents,
@@ -12,14 +20,14 @@ import {
 } from '../features/entry'
 import type { AppController, AppState } from '../state/app-controller'
 
-type BudgetSheet =
+interface CategoryOption {
+  id: string
+  label: string
+}
+
+type BudgetDialogState =
   | { kind: 'total'; amountText: string }
   | { kind: 'category'; categoryId: string; amountText: string }
-
-interface Feedback {
-  kind: 'ok' | 'error'
-  text: string
-}
 
 function errorText(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -33,18 +41,17 @@ function usedPercent(spentCents: number, totalCents: number): number {
 
 /**
  * 预算页(T11):当前月总预算进度(已花/余量/超支)与分类预算列表;
- * 管理员可通过弹层设置/修改/清除预算(元 → 整数分),普通成员只读;
+ * 管理员可通过对话框设置/修改/清除预算(元 → 整数分),普通成员只读;
  * 月份可切换,历史月份显示达成/超支,并提供有总预算月份的历史达成列表。
  */
 export function BudgetPage({ controller, state }: { controller: AppController; state: AppState }) {
   const ledger = state.ledger
   const isAdmin = state.member?.role === 'admin'
   const currentMonth = todayKey().slice(0, 7)
+  const { showDialog } = useDialog()
+  const confirm = useConfirm()
 
   const [month, setMonth] = useState(currentMonth)
-  const [sheet, setSheet] = useState<BudgetSheet | null>(null)
-  const [feedback, setFeedback] = useState<Feedback | null>(null)
-  const [busy, setBusy] = useState(false)
 
   const budget = ledger.meta.budgets[month]
   const aggregate = aggregateMonth(ledger, month)
@@ -53,7 +60,7 @@ export function BudgetPage({ controller, state }: { controller: AppController; s
   const history = budgetHistory(ledger).slice(0, 12)
 
   const { parents, childrenByParent } = groupCategories(ledger.meta.categories)
-  const categoryOptions = parents.flatMap((parent) =>
+  const categoryOptions: CategoryOption[] = parents.flatMap((parent) =>
     (childrenByParent[parent.id] ?? []).map((child) => ({
       id: child.id,
       label: `${parent.name}/${child.name}`,
@@ -61,86 +68,59 @@ export function BudgetPage({ controller, state }: { controller: AppController; s
   )
   const firstCategory = categoryOptions[0]
 
-  const changeMonth = (next: string): void => {
-    setMonth(next)
-    setFeedback(null)
-    setSheet(null)
+  const openBudgetDialog = (initial: BudgetDialogState): void => {
+    const title =
+      initial.kind === 'total' ? '总预算' : resolveCategoryPath(ledger, initial.categoryId)
+    void showDialog<void>(
+      ({ close }) => (
+        <BudgetDialog
+          controller={controller}
+          month={month}
+          budget={budget}
+          categoryOptions={categoryOptions}
+          initial={initial}
+          onClose={() => close(undefined)}
+        />
+      ),
+      { label: title },
+    )
   }
 
-  const run = (task: Promise<unknown>, okText: string): void => {
-    setBusy(true)
-    setFeedback(null)
-    void task
-      .then(() => {
-        setSheet(null)
-        setFeedback({ kind: 'ok', text: okText })
-      })
-      .catch((err: unknown) => {
-        setFeedback({ kind: 'error', text: errorText(err) })
-      })
-      .finally(() => {
-        setBusy(false)
-      })
-  }
-
-  const openTotalSheet = (): void => {
-    setSheet({
+  const openTotalDialog = (): void => {
+    openBudgetDialog({
       kind: 'total',
       amountText: progress.hasTotalBudget ? formatAmountInput(progress.totalCents) : '',
     })
   }
 
-  const openCategorySheet = (categoryId?: string): void => {
+  const openCategoryDialog = (categoryId?: string): void => {
     const target = categoryId ?? firstCategory?.id
     if (!target) return
     const existing = budget?.categoryCents[target]
-    setSheet({
+    openBudgetDialog({
       kind: 'category',
       categoryId: target,
       amountText: existing !== undefined ? formatAmountInput(existing) : '',
     })
   }
 
-  const saveSheet = (): void => {
-    if (!sheet) return
-    let cents: number
-    try {
-      cents = parseAmountToCents(sheet.amountText)
-    } catch (err) {
-      setFeedback({ kind: 'error', text: errorText(err) })
-      return
-    }
-    if (sheet.kind === 'total') {
-      run(controller.setBudget(month, { totalCents: cents }), '总预算已保存')
-    } else {
-      run(
-        controller.setBudget(month, { categoryId: sheet.categoryId, categoryCents: cents }),
-        '分类预算已保存',
-      )
-    }
-  }
-
-  const clearSheetBudget = (): void => {
-    if (!sheet) return
-    if (sheet.kind === 'total') {
-      run(controller.setBudget(month, { totalCents: null }), '已清除总预算')
-    } else {
-      run(
-        controller.setBudget(month, { categoryId: sheet.categoryId, categoryCents: null }),
-        '已清除该分类预算',
-      )
-    }
-  }
-
   const clearMonthBudget = (): void => {
-    if (!window.confirm('清除本月全部预算(总预算与分类预算)?')) return
-    run(controller.clearBudget(month), '已清除本月预算')
+    void confirm('清除本月全部预算(总预算与分类预算)?', {
+      title: '清除本月预算',
+      confirmText: '清除',
+      danger: true,
+    }).then((ok) => {
+      if (!ok) return
+      void controller
+        .clearBudget(month)
+        .then(() => {
+          toast.success('已清除本月预算')
+        })
+        .catch((err: unknown) => {
+          toast.error(errorText(err))
+        })
+    })
   }
-
-  const sheetBudgetExists =
-    sheet?.kind === 'total'
-      ? progress.hasTotalBudget
-      : sheet?.kind === 'category' && budget?.categoryCents[sheet.categoryId] !== undefined
 
   return (
     <div className="page">
@@ -150,7 +130,7 @@ export function BudgetPage({ controller, state }: { controller: AppController; s
             type="button"
             className="month-arrow"
             aria-label="上一月"
-            onClick={() => changeMonth(shiftMonth(month, -1))}
+            onClick={() => setMonth(shiftMonth(month, -1))}
           >
             <MdiChevronLeft className="size-5" />
           </button>
@@ -159,7 +139,7 @@ export function BudgetPage({ controller, state }: { controller: AppController; s
             type="button"
             className="month-arrow"
             aria-label="下一月"
-            onClick={() => changeMonth(shiftMonth(month, 1))}
+            onClick={() => setMonth(shiftMonth(month, 1))}
           >
             <MdiChevronRight className="size-5" />
           </button>
@@ -175,21 +155,17 @@ export function BudgetPage({ controller, state }: { controller: AppController; s
           ) : null}
         </div>
         {month !== currentMonth ? (
-          <button type="button" className="link-button" onClick={() => changeMonth(currentMonth)}>
+          <button type="button" className="link-button" onClick={() => setMonth(currentMonth)}>
             回到本月
           </button>
         ) : null}
       </section>
 
-      {feedback ? (
-        <p className={feedback.kind === 'ok' ? 'form-success' : 'form-error'}>{feedback.text}</p>
-      ) : null}
-
       <section className="card">
         <div className="stats-head">
           <h2 className="card-title">总预算</h2>
           {isAdmin && progress.hasTotalBudget ? (
-            <button type="button" className="text-button" onClick={openTotalSheet}>
+            <button type="button" className="text-button" onClick={openTotalDialog}>
               修改
             </button>
           ) : null}
@@ -225,12 +201,7 @@ export function BudgetPage({ controller, state }: { controller: AppController; s
               </p>
             ) : null}
             {isAdmin ? (
-              <button
-                type="button"
-                className="link-button"
-                disabled={busy}
-                onClick={clearMonthBudget}
-              >
+              <button type="button" className="link-button" onClick={clearMonthBudget}>
                 清除本月全部预算
               </button>
             ) : null}
@@ -240,7 +211,7 @@ export function BudgetPage({ controller, state }: { controller: AppController; s
             <p className="member-meta">
               本月还没有总预算。设置上限后,记账时就能看到余量与超支提示。
             </p>
-            <button type="button" className="primary-button" onClick={openTotalSheet}>
+            <button type="button" className="primary-button" onClick={openTotalDialog}>
               设置总预算
             </button>
           </>
@@ -253,7 +224,7 @@ export function BudgetPage({ controller, state }: { controller: AppController; s
         <div className="stats-head">
           <h2 className="card-title">分类预算</h2>
           {isAdmin && firstCategory ? (
-            <button type="button" className="text-button" onClick={() => openCategorySheet()}>
+            <button type="button" className="text-button" onClick={() => openCategoryDialog()}>
               + 添加
             </button>
           ) : null}
@@ -291,7 +262,7 @@ export function BudgetPage({ controller, state }: { controller: AppController; s
                     <button
                       type="button"
                       className="text-button"
-                      onClick={() => openCategorySheet(item.categoryId)}
+                      onClick={() => openCategoryDialog(item.categoryId)}
                     >
                       修改
                     </button>
@@ -312,7 +283,7 @@ export function BudgetPage({ controller, state }: { controller: AppController; s
                 <button
                   type="button"
                   className="history-month"
-                  onClick={() => changeMonth(item.month)}
+                  onClick={() => setMonth(item.month)}
                 >
                   {formatMonthLabel(item.month)}
                 </button>
@@ -327,87 +298,141 @@ export function BudgetPage({ controller, state }: { controller: AppController; s
           </ul>
         </section>
       ) : null}
-
-      {sheet ? (
-        <div className="sheet-backdrop">
-          <section className="sheet" aria-label="设置预算">
-            <div className="sheet-header">
-              <h2 className="card-title">
-                {sheet.kind === 'total' ? '总预算' : resolveCategoryPath(ledger, sheet.categoryId)}
-              </h2>
-              <button
-                type="button"
-                className="link-button sheet-close"
-                onClick={() => setSheet(null)}
-              >
-                关闭
-              </button>
-            </div>
-            {sheet.kind === 'category' ? (
-              <label className="field">
-                <span>子分类</span>
-                <select
-                  value={sheet.categoryId}
-                  onChange={(event) => {
-                    const categoryId = event.target.value
-                    const existing = budget?.categoryCents[categoryId]
-                    setSheet((current) =>
-                      current?.kind === 'category'
-                        ? {
-                            ...current,
-                            categoryId,
-                            amountText: existing !== undefined ? formatAmountInput(existing) : '',
-                          }
-                        : current,
-                    )
-                  }}
-                >
-                  {categoryOptions.map((option) => (
-                    <option key={option.id} value={option.id}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            ) : null}
-            <label className="field amount-field">
-              <span>预算金额(元)</span>
-              <input
-                // biome-ignore lint/a11y/noAutofocus: 弹层唯一主输入,自动聚焦是刻意行为
-                autoFocus
-                type="text"
-                inputMode="decimal"
-                placeholder="0.00"
-                value={sheet.amountText}
-                onChange={(event) =>
-                  setSheet((current) =>
-                    current ? { ...current, amountText: event.target.value } : current,
-                  )
-                }
-              />
-            </label>
-            <p className="member-meta">{formatMonthLabel(month)}有效;超支只提示,不阻止记账。</p>
-            <button
-              type="button"
-              className="primary-button"
-              disabled={busy || sheet.amountText.trim() === ''}
-              onClick={saveSheet}
-            >
-              {busy ? '保存中…' : '保存'}
-            </button>
-            {sheetBudgetExists ? (
-              <button
-                type="button"
-                className="danger-button"
-                disabled={busy}
-                onClick={clearSheetBudget}
-              >
-                清除该预算
-              </button>
-            ) : null}
-          </section>
-        </div>
-      ) : null}
     </div>
+  )
+}
+
+/** 设置/修改/清除总预算或分类预算;成功 toast 并关闭 */
+function BudgetDialog({
+  controller,
+  month,
+  budget,
+  categoryOptions,
+  initial,
+  onClose,
+}: {
+  controller: AppController
+  month: string
+  budget: Budget | undefined
+  categoryOptions: CategoryOption[]
+  initial: BudgetDialogState
+  onClose: () => void
+}) {
+  const [state, setState] = useState<BudgetDialogState>(initial)
+  const [busy, setBusy] = useState(false)
+
+  const exists =
+    state.kind === 'total'
+      ? budget?.totalCents !== undefined
+      : budget?.categoryCents[state.categoryId] !== undefined
+
+  const save = (): void => {
+    let cents: number
+    try {
+      cents = parseAmountToCents(state.amountText)
+    } catch (err) {
+      toast.error(errorText(err))
+      return
+    }
+    setBusy(true)
+    const run =
+      state.kind === 'total'
+        ? controller.setBudget(month, { totalCents: cents })
+        : controller.setBudget(month, { categoryId: state.categoryId, categoryCents: cents })
+    void run
+      .then(() => {
+        toast.success(state.kind === 'total' ? '总预算已保存' : '分类预算已保存')
+        onClose()
+      })
+      .catch((err: unknown) => {
+        toast.error(errorText(err))
+      })
+      .finally(() => {
+        setBusy(false)
+      })
+  }
+
+  const clear = (): void => {
+    setBusy(true)
+    const run =
+      state.kind === 'total'
+        ? controller.setBudget(month, { totalCents: null })
+        : controller.setBudget(month, { categoryId: state.categoryId, categoryCents: null })
+    void run
+      .then(() => {
+        toast.success(state.kind === 'total' ? '已清除总预算' : '已清除该分类预算')
+        onClose()
+      })
+      .catch((err: unknown) => {
+        toast.error(errorText(err))
+      })
+      .finally(() => {
+        setBusy(false)
+      })
+  }
+
+  const title =
+    state.kind === 'total'
+      ? '总预算'
+      : (categoryOptions.find((option) => option.id === state.categoryId)?.label ?? '分类预算')
+
+  return (
+    <PopupLayout title={title}>
+      {state.kind === 'category' ? (
+        <label className="field">
+          <span>子分类</span>
+          <select
+            value={state.categoryId}
+            onChange={(event) => {
+              const categoryId = event.target.value
+              const existing = budget?.categoryCents[categoryId]
+              setState((current) =>
+                current.kind === 'category'
+                  ? {
+                      ...current,
+                      categoryId,
+                      amountText: existing !== undefined ? formatAmountInput(existing) : '',
+                    }
+                  : current,
+              )
+            }}
+          >
+            {categoryOptions.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
+      <label className="field amount-field">
+        <span>预算金额(元)</span>
+        <input
+          // biome-ignore lint/a11y/noAutofocus: 对话框唯一主输入,自动聚焦是刻意行为
+          autoFocus
+          type="text"
+          inputMode="decimal"
+          placeholder="0.00"
+          value={state.amountText}
+          onChange={(event) =>
+            setState((current) => ({ ...current, amountText: event.target.value }))
+          }
+        />
+      </label>
+      <p className="member-meta">{formatMonthLabel(month)}有效;超支只提示,不阻止记账。</p>
+      <button
+        type="button"
+        className="primary-button"
+        disabled={busy || state.amountText.trim() === ''}
+        onClick={save}
+      >
+        {busy ? '保存中…' : '保存'}
+      </button>
+      {exists ? (
+        <button type="button" className="danger-button" disabled={busy} onClick={clear}>
+          清除该预算
+        </button>
+      ) : null}
+    </PopupLayout>
   )
 }

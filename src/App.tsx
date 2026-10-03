@@ -1,10 +1,12 @@
-import { type ComponentType, useEffect, useState } from 'react'
+import { type ComponentType, type ReactNode, useEffect, useRef, useState } from 'react'
+import { Toaster, toast } from 'sonner'
 import MdiAccountOutline from '~icons/mdi/account-outline'
 import MdiChartDonut from '~icons/mdi/chart-donut'
 import MdiFormatListBulleted from '~icons/mdi/format-list-bulleted'
 import MdiPlusCircleOutline from '~icons/mdi/plus-circle-outline'
 import MdiWalletOutline from '~icons/mdi/wallet-outline'
 import { SyncBadge } from './components/SyncBadge'
+import { useTheme } from './components/theme'
 import { AddExpensePage } from './pages/AddExpensePage'
 import { BudgetPage } from './pages/BudgetPage'
 import { CategoriesPage } from './pages/CategoriesPage'
@@ -37,29 +39,45 @@ const TABS: Tab[] = [
 
 export default function App() {
   const state = useAppState(appController)
+  const { resolved } = useTheme()
+  const previousSync = useRef(state.syncStatus)
 
   useEffect(() => {
     void appController.boot()
     return appController.startConnectivityListeners()
   }, [])
 
+  // 同步失败第一次出现时给一次 toast(重复失败不刷屏)
+  useEffect(() => {
+    if (state.syncStatus === 'error' && previousSync.current !== 'error') {
+      toast.error(
+        state.syncError ? `同步失败:${state.syncError}` : '同步失败,本地记录不受影响,可稍后重试',
+      )
+    }
+    previousSync.current = state.syncStatus
+  }, [state.syncStatus, state.syncError])
+
+  let content: ReactNode
   if (state.phase === 'booting') {
-    return (
+    content = (
       <div className="app app-centered">
         <p className="placeholder">正在打开账本…</p>
       </div>
     )
+  } else if (state.phase === 'setup') {
+    content = <SetupPage controller={appController} state={state} />
+  } else if (state.phase === 'login') {
+    content = <LoginPage controller={appController} state={state} />
+  } else {
+    content = <Shell state={state} />
   }
 
-  if (state.phase === 'setup') {
-    return <SetupPage controller={appController} state={state} />
-  }
-
-  if (state.phase === 'login') {
-    return <LoginPage controller={appController} state={state} />
-  }
-
-  return <Shell state={state} />
+  return (
+    <>
+      {content}
+      <Toaster position="top-center" theme={resolved} richColors closeButton />
+    </>
+  )
 }
 
 function Shell({ state }: { state: AppState }) {

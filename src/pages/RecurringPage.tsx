@@ -1,10 +1,12 @@
 import { useState } from 'react'
+import { toast } from 'sonner'
 import MdiArrowLeft from '~icons/mdi/arrow-left'
 import MdiDeleteOutline from '~icons/mdi/delete-outline'
 import MdiPauseCircleOutline from '~icons/mdi/pause-circle-outline'
 import MdiPencilOutline from '~icons/mdi/pencil-outline'
 import MdiPlayCircleOutline from '~icons/mdi/play-circle-outline'
 import MdiPlus from '~icons/mdi/plus'
+import { PopupLayout, useConfirm, useDialog } from '../components/dialog'
 import {
   canEditRecurring,
   FREQUENCIES,
@@ -35,11 +37,6 @@ interface RuleForm {
   memberId: string
 }
 
-interface Feedback {
-  kind: 'ok' | 'error'
-  text: string
-}
-
 function errorText(err: unknown): string {
   if (err instanceof DomainError || err instanceof Error) return err.message
   return '操作失败,请重试'
@@ -60,7 +57,7 @@ function ruleToForm(ledger: AppState['ledger'], rule: RecurringExpense): RuleFor
 }
 
 /**
- * 周期支出(T12):规则列表(金额/分类/频率/下次到期/启用状态)与创建/编辑弹层。
+ * 周期支出(T12):规则列表(金额/分类/频率/下次到期/启用状态)与创建/编辑对话框。
  * 任何启用成员可创建;编辑/删除仅限创建者、经手人与管理员。
  * 补记在打开应用与每轮同步后自动完成,这里只维护规则。
  */
@@ -76,9 +73,9 @@ export function RecurringPage({
   const ledger = state.ledger
   const actor = state.member
   const today = todayKey()
+  const { showDialog } = useDialog()
+  const confirm = useConfirm()
 
-  const [editing, setEditing] = useState<{ id: string | null; values: RuleForm } | null>(null)
-  const [feedback, setFeedback] = useState<Feedback | null>(null)
   const [busy, setBusy] = useState(false)
 
   const rules = [...ledger.meta.recurring].sort((a, b) =>
@@ -86,95 +83,76 @@ export function RecurringPage({
   )
   const members = (
     state.members.length > 0 ? state.members : state.member ? [state.member] : []
-  ).filter((member) => !member.disabled || member.id === editing?.values.memberId)
+  ).filter((member) => !member.disabled)
 
-  const openCreate = (): void => {
-    setFeedback(null)
-    setEditing({
-      id: null,
-      values: {
-        amountText: '',
-        parentId: '',
-        categoryId: '',
-        frequency: 'monthly',
-        startDate: today,
-        endDate: '',
-        note: '',
-        memberId: actor?.id ?? '',
-      },
-    })
+  const openForm = (rule: RecurringExpense | null): void => {
+    const initial: RuleForm =
+      rule === null
+        ? {
+            amountText: '',
+            parentId: '',
+            categoryId: '',
+            frequency: 'monthly',
+            startDate: today,
+            endDate: '',
+            note: '',
+            memberId: actor?.id ?? '',
+          }
+        : ruleToForm(ledger, rule)
+    const memberOptions =
+      rule === null || members.some((member) => member.id === rule.memberId)
+        ? members
+        : [...members, ...ledger.meta.members.filter((member) => member.id === rule.memberId)]
+    void showDialog<void>(
+      ({ close }) => (
+        <RecurringFormDialog
+          controller={controller}
+          ledger={ledger}
+          members={memberOptions}
+          ruleId={rule?.id ?? null}
+          initial={initial}
+          onClose={() => close(undefined)}
+        />
+      ),
+      { label: rule === null ? '新建周期支出' : '编辑周期支出' },
+    )
   }
 
-  const openEdit = (rule: RecurringExpense): void => {
-    setFeedback(null)
-    setEditing({ id: rule.id, values: ruleToForm(ledger, rule) })
-  }
-
-  const run = (task: Promise<unknown>, okText: string): void => {
+  const toggle = (rule: RecurringExpense): void => {
     setBusy(true)
-    setFeedback(null)
-    void task
+    void controller
+      .updateRecurring(rule.id, { enabled: !rule.enabled })
       .then(() => {
-        setEditing(null)
-        setFeedback({ kind: 'ok', text: okText })
+        toast.success(rule.enabled ? '已停用,不再补记' : '已启用')
       })
       .catch((err: unknown) => {
-        setFeedback({ kind: 'error', text: errorText(err) })
+        toast.error(errorText(err))
       })
       .finally(() => {
         setBusy(false)
       })
   }
 
-  const save = (resolved: { categoryId: string; memberId: string }): void => {
-    if (!editing) return
-    let amountCents: number
-    try {
-      amountCents = parseAmountToCents(editing.values.amountText)
-    } catch (err) {
-      setFeedback({ kind: 'error', text: errorText(err) })
-      return
-    }
-    const note = editing.values.note.trim()
-    const endDate = editing.values.endDate.trim()
-    const base = {
-      amountCents,
-      categoryId: resolved.categoryId,
-      memberId: resolved.memberId,
-      frequency: editing.values.frequency,
-      startDate: editing.values.startDate,
-    }
-    if (editing.id === null) {
-      run(
-        controller.addRecurring({
-          ...base,
-          note: note === '' ? undefined : note,
-          endDate: endDate === '' ? undefined : endDate,
-        }),
-        '周期支出已创建,到期会自动补记',
-      )
-    } else {
-      run(
-        controller.updateRecurring(editing.id, {
-          ...base,
-          note: note === '' ? null : note,
-          endDate: endDate === '' ? null : endDate,
-        }),
-        '规则已更新,仅影响之后的期次',
-      )
-    }
-  }
-
-  const toggle = (rule: RecurringExpense): void => {
-    run(
-      controller.updateRecurring(rule.id, { enabled: !rule.enabled }),
-      rule.enabled ? '已停用,不再补记' : '已启用',
-    )
-  }
-
   const remove = (rule: RecurringExpense): void => {
-    if (!window.confirm('删除该周期支出规则?已补记的支出会保留。')) return
-    run(controller.removeRecurring(rule.id), '规则已删除,已补记的支出保留')
+    void confirm('删除该周期支出规则?已补记的支出会保留。', {
+      title: '删除周期支出',
+      confirmText: '删除',
+      danger: true,
+    }).then((ok) => {
+      if (!ok) return
+      setBusy(true)
+      void controller
+        .removeRecurring(rule.id)
+        .then(() => {
+          toast.success('规则已删除,已补记的支出保留')
+        })
+        .catch((err: unknown) => {
+          toast.error(errorText(err))
+        })
+        .finally(() => {
+          setBusy(false)
+        })
+    })
   }
 
   return (
@@ -195,10 +173,6 @@ export function RecurringPage({
           「周期支出」,可正常编辑或删除;停用后不再补记。
         </p>
       </section>
-
-      {feedback ? (
-        <p className={feedback.kind === 'ok' ? 'form-success' : 'form-error'}>{feedback.text}</p>
-      ) : null}
 
       {rules.length === 0 ? (
         <section className="placeholder-card">
@@ -243,7 +217,7 @@ export function RecurringPage({
                     type="button"
                     className="text-button inline-flex items-center gap-0.5"
                     disabled={!editable || busy}
-                    onClick={() => openEdit(rule)}
+                    onClick={() => openForm(rule)}
                   >
                     <MdiPencilOutline className="size-4" />
                     编辑
@@ -268,44 +242,91 @@ export function RecurringPage({
         type="button"
         className="primary-button inline-flex items-center justify-center gap-1"
         disabled={busy}
-        onClick={openCreate}
+        onClick={() => openForm(null)}
       >
         <MdiPlus className="size-4" />
         新建周期支出
       </button>
-
-      {editing ? (
-        <div className="sheet-backdrop">
-          <section className="sheet" aria-label="周期支出规则">
-            <div className="sheet-header">
-              <h2 className="card-title">
-                {editing.id === null ? '新建周期支出' : '编辑周期支出'}
-              </h2>
-              <button
-                type="button"
-                className="link-button sheet-close"
-                onClick={() => setEditing(null)}
-              >
-                关闭
-              </button>
-            </div>
-            <RuleFormFields
-              ledger={ledger}
-              members={members}
-              values={editing.values}
-              onChange={(patch) =>
-                setEditing((current) =>
-                  current ? { ...current, values: { ...current.values, ...patch } } : current,
-                )
-              }
-              onSubmit={save}
-              submitting={busy}
-              submitLabel={editing.id === null ? '创建规则' : '保存修改'}
-            />
-          </section>
-        </div>
-      ) : null}
     </div>
+  )
+}
+
+/** 周期规则创建/编辑对话框:成功 toast 并关闭 */
+function RecurringFormDialog({
+  controller,
+  ledger,
+  members,
+  ruleId,
+  initial,
+  onClose,
+}: {
+  controller: AppController
+  ledger: AppState['ledger']
+  members: AppState['members']
+  ruleId: string | null
+  initial: RuleForm
+  onClose: () => void
+}) {
+  const [values, setValues] = useState<RuleForm>(initial)
+  const [busy, setBusy] = useState(false)
+
+  const save = (resolved: { categoryId: string; memberId: string }): void => {
+    let amountCents: number
+    try {
+      amountCents = parseAmountToCents(values.amountText)
+    } catch (err) {
+      toast.error(errorText(err))
+      return
+    }
+    const note = values.note.trim()
+    const endDate = values.endDate.trim()
+    const base = {
+      amountCents,
+      categoryId: resolved.categoryId,
+      memberId: resolved.memberId,
+      frequency: values.frequency,
+      startDate: values.startDate,
+    }
+    setBusy(true)
+    const run =
+      ruleId === null
+        ? controller.addRecurring({
+            ...base,
+            note: note === '' ? undefined : note,
+            endDate: endDate === '' ? undefined : endDate,
+          })
+        : controller.updateRecurring(ruleId, {
+            ...base,
+            note: note === '' ? null : note,
+            endDate: endDate === '' ? null : endDate,
+          })
+    void run
+      .then(() => {
+        toast.success(
+          ruleId === null ? '周期支出已创建,到期会自动补记' : '规则已更新,仅影响之后的期次',
+        )
+        onClose()
+      })
+      .catch((err: unknown) => {
+        toast.error(errorText(err))
+      })
+      .finally(() => {
+        setBusy(false)
+      })
+  }
+
+  return (
+    <PopupLayout title={ruleId === null ? '新建周期支出' : '编辑周期支出'}>
+      <RuleFormFields
+        ledger={ledger}
+        members={members}
+        values={values}
+        onChange={(patch) => setValues((current) => ({ ...current, ...patch }))}
+        onSubmit={save}
+        submitting={busy}
+        submitLabel={ruleId === null ? '创建规则' : '保存修改'}
+      />
+    </PopupLayout>
   )
 }
 
@@ -346,7 +367,7 @@ function RuleFormFields({
       <label className="field amount-field">
         <span>金额(元)</span>
         <input
-          // biome-ignore lint/a11y/noAutofocus: 弹层唯一主输入,自动聚焦是刻意行为
+          // biome-ignore lint/a11y/noAutofocus: 对话框唯一主输入,自动聚焦是刻意行为
           autoFocus
           type="text"
           inputMode="decimal"

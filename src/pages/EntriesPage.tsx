@@ -1,11 +1,9 @@
 import { useState } from 'react'
+import { toast } from 'sonner'
 import MdiChevronLeft from '~icons/mdi/chevron-left'
 import MdiChevronRight from '~icons/mdi/chevron-right'
-import {
-  ExpenseForm,
-  type ExpenseFormFeedback,
-  type ExpenseFormValues,
-} from '../components/ExpenseForm'
+import { PopupLayout, useConfirm, useDialog } from '../components/dialog'
+import { ExpenseForm, type ExpenseFormValues } from '../components/ExpenseForm'
 import type { Expense } from '../domain'
 import { DomainError } from '../domain/types'
 import {
@@ -47,13 +45,10 @@ export function EntriesPage({ controller, state }: { controller: AppController; 
   const ledger = state.ledger
   const actor = state.member
   const currentMonth = todayKey().slice(0, 7)
+  const { showDialog } = useDialog()
 
   const [month, setMonth] = useState(currentMonth)
   const [filters, setFilters] = useState<EntryFilters>(EMPTY_FILTERS)
-  const [editing, setEditing] = useState<{ id: string; values: ExpenseFormValues } | null>(null)
-  const [feedback, setFeedback] = useState<ExpenseFormFeedback | null>(null)
-  const [sheetFeedback, setSheetFeedback] = useState<ExpenseFormFeedback | null>(null)
-  const [busy, setBusy] = useState(false)
 
   const monthExpenses = ledger.months[month]?.expenses ?? []
   const visible = filterExpenses(ledger, monthExpenses, filters)
@@ -67,51 +62,23 @@ export function EntriesPage({ controller, state }: { controller: AppController; 
 
   const openEdit = (expense: Expense): void => {
     if (!actor || !canEditEntry(actor, expense)) return
-    setSheetFeedback(null)
-    setEditing({ id: expense.id, values: expenseToForm(ledger, expense) })
+    void showDialog<void>(
+      ({ close }) => (
+        <EditExpenseDialog
+          controller={controller}
+          state={state}
+          expense={expense}
+          onClose={() => close(undefined)}
+        />
+      ),
+      { label: '编辑支出' },
+    )
   }
 
   /** 切月:标签选项按月生成,切月时清掉已选标签避免悬空 */
   const changeMonth = (next: string): void => {
     setMonth(next)
     setFilters((current) => (current.tag === '' ? current : { ...current, tag: '' }))
-  }
-
-  const saveEdit = (resolved: { categoryId: string; memberId: string }): void => {
-    if (!editing) return
-    setBusy(true)
-    setSheetFeedback(null)
-    void controller
-      .updateExpense(editing.id, { ...editing.values, ...resolved })
-      .then(() => {
-        setEditing(null)
-        setFeedback({ kind: 'ok', text: '已保存修改' })
-      })
-      .catch((err: unknown) => {
-        setSheetFeedback({ kind: 'error', text: errorText(err) })
-      })
-      .finally(() => {
-        setBusy(false)
-      })
-  }
-
-  const deleteEditing = (): void => {
-    if (!editing) return
-    if (!window.confirm('删除这笔支出?删除会同步到所有设备。')) return
-    setBusy(true)
-    setSheetFeedback(null)
-    void controller
-      .deleteExpense(editing.id)
-      .then(() => {
-        setEditing(null)
-        setFeedback({ kind: 'ok', text: '已删除' })
-      })
-      .catch((err: unknown) => {
-        setSheetFeedback({ kind: 'error', text: errorText(err) })
-      })
-      .finally(() => {
-        setBusy(false)
-      })
   }
 
   return (
@@ -126,7 +93,7 @@ export function EntriesPage({ controller, state }: { controller: AppController; 
           >
             <MdiChevronLeft className="size-5" />
           </button>
-          <div className="chip-row month-row">
+          <div className="chip-row month-row scrollbar-hidden">
             {options.map((option) => (
               <button
                 key={option.month}
@@ -264,15 +231,11 @@ export function EntriesPage({ controller, state }: { controller: AppController; 
         </button>
       </section>
 
-      {feedback ? (
-        <p className={feedback.kind === 'ok' ? 'form-success' : 'form-error'}>{feedback.text}</p>
-      ) : null}
-
       {groups.length === 0 ? (
         <section className="placeholder-card">
           <p className="placeholder-title">本月还没有支出</p>
           <p className="placeholder-note">
-            {filtering ? '试试换个筛选条件,或清空筛选。' : '去「记一笔」记下第一笔吧。'}
+            {filtering ? '试试换个筛选条件,或清空筛选。' : '去首页的「记一笔」记下第一笔吧。'}
           </p>
         </section>
       ) : (
@@ -319,48 +282,84 @@ export function EntriesPage({ controller, state }: { controller: AppController; 
           </section>
         ))
       )}
-
-      {editing ? (
-        <div className="sheet-backdrop">
-          <section className="sheet" aria-label="编辑支出">
-            <div className="sheet-header">
-              <h2 className="card-title">编辑支出</h2>
-              <button
-                type="button"
-                className="link-button sheet-close"
-                onClick={() => setEditing(null)}
-              >
-                关闭
-              </button>
-            </div>
-            <ExpenseForm
-              categories={ledger.meta.categories}
-              members={state.members}
-              currentMemberId={state.member?.id}
-              values={editing.values}
-              onChange={(patch) =>
-                setEditing((current) =>
-                  current ? { ...current, values: { ...current.values, ...patch } } : current,
-                )
-              }
-              onSubmit={saveEdit}
-              submitLabel="保存修改"
-              submitting={busy}
-              feedback={sheetFeedback}
-              footer={
-                <button
-                  type="button"
-                  className="danger-button"
-                  disabled={busy}
-                  onClick={deleteEditing}
-                >
-                  删除这笔
-                </button>
-              }
-            />
-          </section>
-        </div>
-      ) : null}
     </div>
+  )
+}
+
+/** 编辑支出对话框:保存/删除成功 toast 并关闭;失败留在框内可重试 */
+function EditExpenseDialog({
+  controller,
+  state,
+  expense,
+  onClose,
+}: {
+  controller: AppController
+  state: AppState
+  expense: Expense
+  onClose: () => void
+}) {
+  const [values, setValues] = useState<ExpenseFormValues>(() =>
+    expenseToForm(state.ledger, expense),
+  )
+  const [busy, setBusy] = useState(false)
+  const confirm = useConfirm()
+
+  const save = (resolved: { categoryId: string; memberId: string }): void => {
+    setBusy(true)
+    void controller
+      .updateExpense(expense.id, { ...values, ...resolved })
+      .then(() => {
+        toast.success('已保存修改')
+        onClose()
+      })
+      .catch((err: unknown) => {
+        toast.error(errorText(err))
+      })
+      .finally(() => {
+        setBusy(false)
+      })
+  }
+
+  const remove = (): void => {
+    void confirm('删除这笔支出?删除会同步到所有设备。', {
+      title: '删除支出',
+      confirmText: '删除',
+      danger: true,
+    }).then((ok) => {
+      if (!ok) return
+      setBusy(true)
+      void controller
+        .deleteExpense(expense.id)
+        .then(() => {
+          toast.success('已删除')
+          onClose()
+        })
+        .catch((err: unknown) => {
+          toast.error(errorText(err))
+        })
+        .finally(() => {
+          setBusy(false)
+        })
+    })
+  }
+
+  return (
+    <PopupLayout title="编辑支出">
+      <ExpenseForm
+        categories={state.ledger.meta.categories}
+        members={state.members}
+        currentMemberId={state.member?.id}
+        values={values}
+        onChange={(patch) => setValues((current) => ({ ...current, ...patch }))}
+        onSubmit={save}
+        submitLabel="保存修改"
+        submitting={busy}
+        footer={
+          <button type="button" className="danger-button" disabled={busy} onClick={remove}>
+            删除这笔
+          </button>
+        }
+      />
+    </PopupLayout>
   )
 }
