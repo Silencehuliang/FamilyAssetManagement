@@ -6,6 +6,7 @@ v1 的标签是支出上的字符串数组(`tagNames`),无法安全地改名、�
 
 - `ledger/meta/tags.json`:`{"tags": [{"id","name"}]}` —— 标签实体,id 为 `tag-<sha256(name) 前 8 字节 hex>`,由名字确定性派生
 - `ledger/meta/tagGroups.json`:`{"groups": [{"id","name","color","tagIds","singleSelect?","required?"}]}` —— 标签组,含颜色与单选/必选规则
+- `TagGroup` 增加可选 `sortOrder`(加性字段):同步合并会按键 id 重排数组,数组顺序无法表达自定义排序,展示顺序以本字段为准(缺省按 0,新建组取最大 +1 追加到末尾)
 - 支出改存 `tagIds: string[]`;`tagNames` 字段废弃
 
 **迁移**:首次启动(任一设备)扫描全部支出的 `tagNames`,按名字派生 id 建实体、改写为 `tagIds`,并移除 `tagNames`。确定性 id 保证多设备各自迁移后再经 LWW 合并仍收敛到同一批标签。迁移幂等,可安全重放。

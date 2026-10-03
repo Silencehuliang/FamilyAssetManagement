@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { addExpense, canEditExpense, deleteExpense, updateExpense } from './expenses'
+import {
+  addExpense,
+  canEditExpense,
+  deleteExpense,
+  isValidAmountCents,
+  MAX_AMOUNT_CENTS,
+  updateExpense,
+} from './expenses'
 import {
   ADMIN,
   DALI,
@@ -89,6 +96,43 @@ describe('addExpense', () => {
         ctx(LAOSAN),
       ),
     ).toThrowError(/停用/)
+  })
+})
+
+describe('金额上限(评审修复 #29)', () => {
+  it('isValidAmountCents:正的安全整数分且 ≤ MAX_AMOUNT_CENTS', () => {
+    expect(isValidAmountCents(1)).toBe(true)
+    expect(isValidAmountCents(MAX_AMOUNT_CENTS)).toBe(true)
+    expect(isValidAmountCents(MAX_AMOUNT_CENTS + 1)).toBe(false)
+    expect(isValidAmountCents(0)).toBe(false)
+    expect(isValidAmountCents(-1)).toBe(false)
+    expect(isValidAmountCents(1.5)).toBe(false)
+    expect(isValidAmountCents(Number.MAX_SAFE_INTEGER + 1)).toBe(false)
+  })
+
+  it('addExpense 边界接受、越界拒绝(invalid_amount)', () => {
+    const ledger = fixtureLedger()
+    const base = { date: '2026-10-02', categoryId: LUNCH_CATEGORY }
+    expect(() =>
+      addExpense(ledger, { ...base, amountCents: MAX_AMOUNT_CENTS }, ctx()),
+    ).not.toThrow()
+
+    expect(() =>
+      addExpense(ledger, { ...base, amountCents: MAX_AMOUNT_CENTS + 1 }, ctx()),
+    ).toThrowError(/金额/)
+    // 16 位数字公式换算出的量级:整数但超出安全整数,同样拒绝
+    expect(() => addExpense(ledger, { ...base, amountCents: 1e18 }, ctx())).toThrowError(/金额/)
+  })
+
+  it('updateExpense 越界补丁被拒且不改动原记录', () => {
+    const ledger = fixtureLedger()
+    addExpense(ledger, { amountCents: 100, date: '2026-10-02', categoryId: LUNCH_CATEGORY }, ctx())
+    const { id } = expenseAt(ledger, '2026-10', 0)
+
+    expect(() =>
+      updateExpense(ledger, id, { amountCents: MAX_AMOUNT_CENTS + 1 }, ctx()),
+    ).toThrowError(/金额/)
+    expect(expenseAt(ledger, '2026-10', 0).amountCents).toBe(100)
   })
 })
 

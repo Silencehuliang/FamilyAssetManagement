@@ -22,8 +22,10 @@ import type {
 import { ApiError } from '../api/client'
 import {
   addCategory as addCategoryInLedger,
-  addExpense,
+  addExpense as addExpenseInLedger,
   addRecurring as addRecurringInLedger,
+  addTagGroup as addTagGroupInLedger,
+  addTag as addTagInLedger,
   type BudgetPatch,
   type Category,
   type CategoryId,
@@ -31,8 +33,12 @@ import {
   createEmptyLedger,
   deleteCategory as deleteCategoryInLedger,
   deleteExpense as deleteExpenseInLedger,
+  deleteTagGroup as deleteTagGroupInLedger,
+  deleteTag as deleteTagInLedger,
   type Expense,
   type ExpenseId,
+  type ExpenseInput,
+  type ExpensePatch,
   generateDueExpenses,
   type LedgerData,
   type Member,
@@ -43,11 +49,20 @@ import {
   type RecurringInput,
   type RecurringPatch,
   removeRecurring as removeRecurringInLedger,
+  renameTag as renameTagInLedger,
   setCategoryBudget as setCategoryBudgetInLedger,
+  setTagGroupOrder as setTagGroupOrderInLedger,
   setTotalBudget as setTotalBudgetInLedger,
+  type Tag,
+  type TagGroup,
+  type TagGroupId,
+  type TagGroupInput,
+  type TagGroupPatch,
+  type TagId,
   updateCategory as updateCategoryInLedger,
   updateExpense as updateExpenseInLedger,
   updateRecurring as updateRecurringInLedger,
+  updateTagGroup as updateTagGroupInLedger,
   upsertTagsByName,
 } from '../domain'
 import { DomainError } from '../domain/types'
@@ -60,6 +75,7 @@ import {
   splitTags,
   todayKey,
 } from '../features/entry'
+import { tagUsageCount as countTagUsage, nextTagGroupSortOrder } from '../features/tags'
 import { errorText } from '../lib/errors'
 import type { LocalStore } from '../storage'
 import { MemoryLocalStore, PersistentQueue } from '../storage'
@@ -255,7 +271,7 @@ export class AppController {
     await upsertTagsByName(this.ledger, splitTags(form.tagsText), now)
     const input = await buildExpenseInput(this.ledger, form, actor.id)
     const newId = this.generateId()
-    addExpense(this.ledger, input, { actor, now, newId })
+    addExpenseInLedger(this.ledger, input, { actor, now, newId })
 
     const month = input.date.slice(0, 7)
     const created = this.ledger.months[month]?.expenses.find((e) => e.id === newId)
@@ -264,6 +280,36 @@ export class AppController {
     await this.persistLedger()
     void this.syncManager?.syncNow()
     return created
+  }
+
+  /**
+   * 全屏记账编辑器写入(V7):金额/分类/标签(id 直用,不经过名字派生,改名后的
+   * 标签实体也稳定命中)已由 features/editor 组装为领域输入;本地立即生效 →
+   * 写穿 IndexedDB → 后台同步。首次离线启动时先播种默认分类。
+   */
+  async addExpense(input: ExpenseInput): Promise<Expense> {
+    ensureCategories(this.ledger)
+    const actor = this.currentActor()
+    const newId = this.generateId()
+    addExpenseInLedger(this.ledger, input, { actor, now: this.nowIso(), newId })
+    const month = input.date.slice(0, 7)
+    const created = this.ledger.months[month]?.expenses.find((e) => e.id === newId)
+    if (!created) throw new Error('新增支出后未找到记录')
+    await this.persistLedger()
+    void this.syncManager?.syncNow()
+    return created
+  }
+
+  /** 编辑器保存编辑:补丁直接带 tagIds;领域层校验编辑权限后本地生效并后台同步 */
+  async patchExpense(id: ExpenseId, patch: ExpensePatch): Promise<void> {
+    const actor = this.currentActor()
+    updateExpenseInLedger(this.ledger, id, patch, {
+      actor,
+      now: this.nowIso(),
+      newId: this.generateId(),
+    })
+    await this.persistLedger()
+    void this.syncManager?.syncNow()
   }
 
   /**
@@ -304,6 +350,83 @@ export class AppController {
       if (data.expenses.some((e) => e.id === id)) return month
     }
     throw new DomainError('unknown_expense', `支出不存在:${id}`)
+  }
+
+  /* ---------------- 标签与标签组管理(V6) ---------------- */
+
+  /** 新建标签(成员即可):名字派生确定性 id;写穿本地并后台同步 */
+  async addTag(name: string): Promise<Tag> {
+    const actor = this.currentActor()
+    const tag = await addTagInLedger(this.ledger, actor, name, this.nowIso())
+    await this.persistLedger()
+    void this.syncManager?.syncNow()
+    return tag
+  }
+
+  /** 重命名标签(成员即可):id 稳定,支出/组引用不受影响 */
+  async renameTag(id: TagId, name: string): Promise<void> {
+    const actor = this.currentActor()
+    renameTagInLedger(this.ledger, actor, id, name, this.nowIso())
+    await this.persistLedger()
+    void this.syncManager?.syncNow()
+  }
+
+  /**
+   * 删除标签(成员即可):领域层清理全部支出与标签组中的引用,并登记
+   * delete-tag 离线墓碑,由 replay 在同步时补删远端、防止旧副本复活引用。
+   */
+  async deleteTag(id: TagId): Promise<void> {
+    const actor = this.currentActor()
+    deleteTagInLedger(this.ledger, actor, id, this.nowIso())
+    this.queue.record({ type: 'delete-tag', id })
+    await this.persistLedger()
+    void this.syncManager?.syncNow()
+  }
+
+  /** 该标签被多少笔支出引用(删除确认的「将清理 N 笔支出中的引用」) */
+  tagUsageCount(id: TagId): number {
+    return countTagUsage(this.ledger, id)
+  }
+
+  /** 新建标签组(仅管理员;领域层二次门禁):追加到展示顺序末尾 */
+  async addTagGroup(input: TagGroupInput): Promise<TagGroup> {
+    const actor = this.currentActor()
+    const id = input.id ?? `grp-${this.generateId()}`
+    addTagGroupInLedger(this.ledger, actor, {
+      ...input,
+      id,
+      sortOrder: input.sortOrder ?? nextTagGroupSortOrder(this.ledger.meta.tagGroups),
+    })
+    const created = this.ledger.meta.tagGroups.find((group) => group.id === id)
+    if (!created) throw new Error('新增标签组后未找到记录')
+    await this.persistLedger()
+    void this.syncManager?.syncNow()
+    return created
+  }
+
+  /** 修改标签组(仅管理员):名称/颜色/包含标签/单选/必选 */
+  async updateTagGroup(id: TagGroupId, patch: TagGroupPatch): Promise<void> {
+    const actor = this.currentActor()
+    updateTagGroupInLedger(this.ledger, actor, id, patch)
+    await this.persistLedger()
+    void this.syncManager?.syncNow()
+  }
+
+  /** 删除标签组(仅管理员):仅解散分组;登记 delete-tag-group 墓碑传播删除 */
+  async deleteTagGroup(id: TagGroupId): Promise<void> {
+    const actor = this.currentActor()
+    deleteTagGroupInLedger(this.ledger, actor, id)
+    this.queue.record({ type: 'delete-tag-group', id })
+    await this.persistLedger()
+    void this.syncManager?.syncNow()
+  }
+
+  /** 重排标签组展示顺序(仅管理员):按完整 id 顺序写入 sortOrder */
+  async reorderTagGroups(orderedIds: readonly TagGroupId[]): Promise<void> {
+    const actor = this.currentActor()
+    setTagGroupOrderInLedger(this.ledger, actor, orderedIds)
+    await this.persistLedger()
+    void this.syncManager?.syncNow()
   }
 
   /**

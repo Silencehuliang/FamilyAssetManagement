@@ -19,6 +19,7 @@ import {
 } from '../domain'
 import { ADMIN, fixtureLedger, LUNCH_CATEGORY, NOW, XIAOHONG } from '../domain/fixtures'
 import { expenseToForm } from '../features/entries'
+import { sortedTagGroups } from '../features/tags'
 import { MemoryLocalStore } from '../storage'
 import { InMemoryEndpoint } from '../sync'
 import { type AppApi, AppController } from './app-controller'
@@ -1074,6 +1075,216 @@ describe('AppController 成员管理(T9)', () => {
     await expect(
       controller.createMember({ username: 'aming', displayName: '重复', password: 'pw-123456' }),
     ).rejects.toMatchObject({ status: 409, code: 'member_duplicated' })
+  })
+})
+
+describe('AppController 标签与标签组管理(V6)', () => {
+  async function readyController(
+    actor: Member = ADMIN,
+    newId?: () => string,
+    isOnline?: () => boolean,
+  ) {
+    const api = new FakeApi()
+    api.session = sessionOf(actor)
+    api.members = [ADMIN, XIAOHONG]
+    const made = makeController({
+      api,
+      now: () => new Date('2026-10-02T08:30:00.000Z'),
+      newId,
+      isOnline,
+    })
+    await made.controller.boot()
+    return made
+  }
+
+  const taggedForm = {
+    amountText: '12.5',
+    parentId: 'cat-dining',
+    categoryId: 'cat-dining-2',
+    date: '2026-10-02',
+    note: '',
+    tagsText: '微信, 现金',
+    memberId: '',
+  }
+
+  it('成员新建/改名标签:写穿本地并同步到 tags.json', async () => {
+    const { controller, store, endpoint } = await readyController(XIAOHONG)
+
+    const tag = await controller.addTag(' 微信 ')
+    expect(tag).toMatchObject({ id: await tagIdFromName('微信'), name: '微信' })
+    await controller.renameTag(tag.id, '支付宝')
+    expect(controller.getLedger().meta.tags[0]?.name).toBe('支付宝')
+    expect((await store.loadLedger())?.meta.tags[0]?.name).toBe('支付宝')
+
+    await controller.retrySync()
+    const files = await endpoint.listFiles()
+    expect(files['ledger/meta/tags.json']?.content).toContain('支付宝')
+  })
+
+  it('删除标签:清理支出引用、登记 delete-tag 墓碑,同步后远端引用一并清理', async () => {
+    let online = true
+    const { controller, store, endpoint } = await readyController(ADMIN, undefined, () => online)
+    await controller.recordExpense(taggedForm)
+    await controller.retrySync()
+    const wechat = await tagIdFromName('微信')
+    expect(controller.tagUsageCount(wechat)).toBe(1)
+
+    // 离线删除:本地立即生效并登记墓碑;恢复联网后 replay 一并清理远端引用
+    online = false
+    await controller.deleteTag(wechat)
+    online = true
+
+    expect(controller.getLedger().meta.tags.map((t) => t.name)).toEqual(['现金'])
+    expect(controller.getLedger().months['2026-10']?.expenses[0]?.tagIds).toEqual([
+      await tagIdFromName('现金'),
+    ])
+    await expect(store.loadQueueOps()).resolves.toEqual([{ type: 'delete-tag', id: wechat }])
+
+    await controller.retrySync()
+    const files = await endpoint.listFiles()
+    expect(files['ledger/meta/tags.json']?.content).not.toContain('微信')
+    expect(files['ledger/months/2026-10.json']?.content).not.toContain(wechat)
+    await expect(store.loadQueueOps()).resolves.toEqual([])
+  })
+
+  it('tagUsageCount:按支出笔数统计(删除确认文案用)', async () => {
+    const { controller } = await readyController()
+    await expect(controller.recordExpense(taggedForm)).resolves.toBeDefined()
+    const wechat = await tagIdFromName('微信')
+    const cash = await tagIdFromName('现金')
+
+    expect(controller.tagUsageCount(wechat)).toBe(1)
+    expect(controller.tagUsageCount(cash)).toBe(1)
+    expect(controller.tagUsageCount('tag-missing')).toBe(0)
+  })
+
+  it('普通成员:标签可写,标签组管理被领域层拒绝且不登记队列', async () => {
+    const { controller, store } = await readyController(XIAOHONG)
+
+    await expect(controller.addTagGroup({ name: '支付方式', color: 'blue' })).rejects.toThrow(
+      /仅管理员/,
+    )
+    await expect(controller.updateTagGroup('grp-1', { color: 'red' })).rejects.toThrow(/仅管理员/)
+    await expect(controller.deleteTagGroup('grp-1')).rejects.toThrow(/仅管理员/)
+    await expect(controller.reorderTagGroups(['grp-1'])).rejects.toThrow(/仅管理员/)
+    expect(controller.getLedger().meta.tagGroups).toEqual([])
+    await expect(store.loadQueueOps()).resolves.toEqual([])
+  })
+
+  it('管理员建组/改组/排序/删组:队列登记墓碑并在同步后落远端', async () => {
+    let seq = 0
+    const { controller, store, endpoint } = await readyController(ADMIN, () => `fixed-${++seq}`)
+    const wx = await controller.addTag('微信')
+    const cash = await controller.addTag('现金')
+
+    const first = await controller.addTagGroup({ name: '支付方式', color: 'blue', tagIds: [wx.id] })
+    const second = await controller.addTagGroup({ name: '场景', color: 'green' })
+    expect(first).toMatchObject({ id: 'grp-fixed-1', sortOrder: 0 })
+    expect(second).toMatchObject({ id: 'grp-fixed-2', sortOrder: 1 })
+
+    await controller.updateTagGroup(second.id, {
+      tagIds: [cash.id],
+      singleSelect: true,
+      required: true,
+    })
+    expect(controller.getLedger().meta.tagGroups[1]).toMatchObject({
+      tagIds: [cash.id],
+      singleSelect: true,
+      required: true,
+    })
+
+    await controller.reorderTagGroups([second.id, first.id])
+    expect(controller.getLedger().meta.tagGroups.map((g) => [g.id, g.sortOrder])).toEqual([
+      ['grp-fixed-1', 1],
+      ['grp-fixed-2', 0],
+    ])
+
+    await controller.deleteTagGroup(first.id)
+    await expect(store.loadQueueOps()).resolves.toEqual([
+      { type: 'delete-tag-group', id: 'grp-fixed-1' },
+    ])
+
+    await controller.retrySync()
+    const files = await endpoint.listFiles()
+    expect(files['ledger/meta/tagGroups.json']?.content).not.toContain('grp-fixed-1')
+    expect(files['ledger/meta/tagGroups.json']?.content).toContain('grp-fixed-2')
+    await expect(store.loadQueueOps()).resolves.toEqual([])
+  })
+
+  it('回归(#29):旧组缺 sortOrder 时新建组仍排最后', async () => {
+    const { controller } = await readyController(ADMIN, () => 'fixed-new')
+    // 旧数据(V6 之前落库的组)没有 sortOrder 字段
+    controller.getLedger().meta.tagGroups = [
+      { id: 'grp-legacy-1', name: '旧一', color: 'blue', tagIds: [] },
+      { id: 'grp-legacy-2', name: '旧二', color: 'red', tagIds: [] },
+    ]
+
+    const created = await controller.addTagGroup({ name: '新组', color: 'gray' })
+
+    expect(created).toMatchObject({ id: 'grp-fixed-new', sortOrder: 1 })
+    expect(sortedTagGroups(controller.getLedger().meta.tagGroups).map((group) => group.id)).toEqual(
+      ['grp-legacy-1', 'grp-legacy-2', 'grp-fixed-new'],
+    )
+  })
+})
+
+describe('AppController 编辑器写入(V7)', () => {
+  async function readyController(newId: () => string) {
+    const api = new FakeApi()
+    api.session = sessionOf(ADMIN)
+    api.members = [ADMIN, XIAOHONG]
+    const made = makeController({
+      api,
+      now: () => new Date('2026-10-03T08:30:00.000Z'),
+      newId,
+    })
+    await made.controller.boot()
+    return made
+  }
+
+  it('addExpense 直写 tagIds:改名后的标签仍按实体 id 命中(不经过名字派生)', async () => {
+    let seq = 0
+    const { controller, store, endpoint } = await readyController(() => `e-${++seq}`)
+    const wechat = await controller.addTag('微信')
+    await controller.renameTag(wechat.id, '支付宝')
+
+    const created = await controller.addExpense({
+      amountCents: 1500,
+      date: '2026-10-03',
+      categoryId: 'cat-dining-1',
+      tagIds: [wechat.id],
+      note: '午饭',
+    })
+
+    expect(created).toMatchObject({ id: 'e-1', amountCents: 1500, tagIds: [wechat.id] })
+    expect(controller.getLedger().meta.tags[0]?.name).toBe('支付宝')
+    expect((await store.loadLedger())?.months['2026-10']?.expenses[0]?.tagIds).toEqual([wechat.id])
+
+    await controller.retrySync()
+    expect((await endpoint.listFiles())['ledger/months/2026-10.json']?.content).toContain(wechat.id)
+  })
+
+  it('patchExpense:金额/标签/备注整体替换,写穿并同步', async () => {
+    const { controller, store } = await readyController(() => 'e-1')
+    const tag = await controller.addTag('现金')
+    await controller.addExpense({
+      amountCents: 1000,
+      date: '2026-10-03',
+      categoryId: 'cat-dining-1',
+      tagIds: [],
+      note: '旧备注',
+    })
+
+    await controller.patchExpense('e-1', {
+      amountCents: 2500,
+      tagIds: [tag.id],
+      note: null,
+    })
+
+    const updated = controller.getLedger().months['2026-10']?.expenses[0]
+    expect(updated).toMatchObject({ amountCents: 2500, tagIds: [tag.id] })
+    expect(updated?.note).toBeUndefined()
+    expect((await store.loadLedger())?.months['2026-10']?.expenses[0]?.amountCents).toBe(2500)
   })
 })
 

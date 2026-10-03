@@ -18,6 +18,7 @@ import {
   findTag,
   isTagColor,
   renameTag,
+  setTagGroupOrder,
   synthesizeUngrouped,
   TAG_PALETTE,
   tagIdFromName,
@@ -285,6 +286,28 @@ describe('标签组 CRUD(管理员门禁)', () => {
     expect(ledger.meta.tags).toEqual([tag])
     expect(expense.tagIds).toEqual([tag.id])
     expect(() => deleteTagGroup(ledger, ADMIN, 'g-1')).toThrowError(/标签组不存在/)
+  })
+
+  it('setTagGroupOrder:按给定顺序写 sortOrder;不在列表中的组保持原值', async () => {
+    const ledger = fixtureLedger()
+    addTagGroup(ledger, ADMIN, { id: 'g-1', name: '一', color: 'blue', tagIds: [] })
+    addTagGroup(ledger, ADMIN, { id: 'g-2', name: '二', color: 'red', tagIds: [], sortOrder: 1 })
+    addTagGroup(ledger, ADMIN, { id: 'g-3', name: '三', color: 'green', tagIds: [], sortOrder: 2 })
+
+    setTagGroupOrder(ledger, ADMIN, ['g-3', 'g-1', 'g-2'])
+
+    expect(ledger.meta.tagGroups.map((g) => [g.id, g.sortOrder])).toEqual([
+      ['g-1', 1],
+      ['g-2', 2],
+      ['g-3', 0],
+    ])
+  })
+
+  it('setTagGroupOrder:普通成员被拒(forbidden)', () => {
+    const ledger = fixtureLedger()
+    addTagGroup(ledger, ADMIN, { id: 'g-1', name: '一', color: 'blue', tagIds: [] })
+
+    expect(() => setTagGroupOrder(ledger, XIAOHONG, ['g-1'])).toThrowError(/仅管理员/)
   })
 })
 

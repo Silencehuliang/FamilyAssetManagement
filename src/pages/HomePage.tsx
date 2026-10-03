@@ -2,8 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import MdiChevronRight from '~icons/mdi/chevron-right'
 import MdiPlus from '~icons/mdi/plus'
 import { AnimatedNumber } from '../components/AnimatedNumber'
-import { useDialog } from '../components/dialog'
-import { EditExpenseDialog } from '../components/EditExpenseDialog'
+import { useBillEditor } from '../components/editor'
 import type { Expense } from '../domain'
 import { canEditEntry, memberNameOf } from '../features/entries'
 import { formatCents, resolveCategoryName, todayKey } from '../features/entry'
@@ -17,6 +16,7 @@ import {
   homeSummary,
 } from '../features/home'
 import { type CategorySlice, chartColor } from '../features/stats'
+import { resolveExpenseTagNames } from '../features/tags'
 import type { AppController, AppState } from '../state/app-controller'
 
 const WIDGET_CLASS =
@@ -49,7 +49,7 @@ export function HomePage({
   const slices = homeDonut(ledger, month)
   const donutTotal = slices.reduce((total, slice) => total + slice.totalCents, 0)
   const groups = homeBillGroups(ledger)
-  const { showDialog } = useDialog()
+  const openBillEditor = useBillEditor(controller)
 
   const railRef = useRef<HTMLDivElement | null>(null)
   const [activeWidget, setActiveWidget] = useState(0)
@@ -78,17 +78,7 @@ export function HomePage({
 
   const openEdit = (expense: Expense): void => {
     if (!state.member || !canEditEntry(state.member, expense)) return
-    void showDialog<void>(
-      ({ close }) => (
-        <EditExpenseDialog
-          controller={controller}
-          state={state}
-          expense={expense}
-          onClose={() => close(undefined)}
-        />
-      ),
-      { label: '编辑支出' },
-    )
+    void openBillEditor({ expense })
   }
 
   return (
@@ -246,7 +236,7 @@ export function HomePage({
                             <span className="truncate text-sm font-medium">
                               {resolveCategoryName(ledger, expense.categoryId)}
                             </span>
-                            {expense.tagNames.map((tag) => (
+                            {resolveExpenseTagNames(ledger, expense).map((tag) => (
                               <span key={tag} className="entry-tag">
                                 #{tag}
                               </span>

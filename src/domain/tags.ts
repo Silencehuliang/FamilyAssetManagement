@@ -200,6 +200,7 @@ export interface TagGroupInput {
   tagIds?: TagId[]
   singleSelect?: boolean
   required?: boolean
+  sortOrder?: number
 }
 
 function normalizeTagIds(ledger: LedgerData, tagIds: readonly TagId[] | undefined): TagId[] {
@@ -233,6 +234,7 @@ export function addTagGroup(ledger: LedgerData, actor: Member, input: TagGroupIn
     tagIds: input.tagIds ?? [],
     singleSelect: input.singleSelect,
     required: input.required,
+    sortOrder: input.sortOrder,
   })
   ledger.meta.tagGroups.push(group)
   return ledger
@@ -270,6 +272,28 @@ export function deleteTagGroup(ledger: LedgerData, actor: Member, id: TagGroupId
     throw new DomainError('unknown_tag_group', `标签组不存在:${id}`)
   }
   ledger.meta.tagGroups = ledger.meta.tagGroups.filter((g) => g.id !== id)
+  return ledger
+}
+
+/**
+ * 重排标签组(仅管理员):按给定 id 顺序写入 sortOrder(0,1,2…);
+ * 不在列表中的组保持原 sortOrder 不变(界面每次提交完整顺序)。
+ */
+export function setTagGroupOrder(
+  ledger: LedgerData,
+  actor: Member,
+  orderedIds: readonly TagGroupId[],
+): LedgerData {
+  assertActive(actor)
+  requireAdmin(actor)
+  const order = new Map<TagGroupId, number>()
+  orderedIds.forEach((id, index) => {
+    order.set(id, index)
+  })
+  for (const group of ledger.meta.tagGroups) {
+    const index = order.get(group.id)
+    if (index !== undefined) group.sortOrder = index
+  }
   return ledger
 }
 
