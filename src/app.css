@@ -562,7 +562,7 @@
     @apply border-ring outline-none ring-2 ring-ring/30;
   }
 
-  /* 统计页:手写 SVG 图表保留,色板走令牌 */
+  /* 统计页(V9,ECharts):图表容器与标签明细 */
   .stats-range-hint {
     @apply mt-3;
   }
@@ -579,69 +579,41 @@
     @apply px-2.5 py-1 text-xs;
   }
 
-  .chart-svg {
-    @apply mt-2.5 block h-auto w-full;
+  .chart-canvas {
+    @apply mt-2.5 w-full;
   }
 
-  .chart-bar {
-    fill: var(--chart-1);
+  .stats-drill-bar {
+    @apply mt-2 mb-1 flex items-center justify-between gap-2 text-[13px];
   }
 
-  .chart-bar-empty {
-    fill: var(--border);
+  .tag-detail-list {
+    @apply mt-1;
   }
 
-  .chart-label,
-  .chart-value {
-    fill: var(--muted-foreground);
-    font-size: 10px;
+  .tag-detail-group + .tag-detail-group {
+    @apply mt-3;
   }
 
-  .chart-value {
-    font-variant-numeric: tabular-nums;
+  .tag-detail-group-head {
+    @apply flex items-center gap-2 text-[13px] font-medium;
   }
 
-  .donut {
-    @apply mx-auto mt-2.5 max-w-[216px];
+  .tag-detail-group ul {
+    @apply m-0 list-none p-0;
   }
 
-  .donut-total {
-    fill: var(--foreground);
-    font-size: 14px;
-    font-weight: 600;
+  .tag-detail-row {
+    @apply flex w-full appearance-none items-center gap-2 border-t border-border bg-transparent py-1.5 pl-6 text-left text-[13px] text-inherit;
   }
 
-  .donut-caption {
-    fill: var(--muted-foreground);
-    font-size: 10px;
+  .tag-detail-row:disabled {
+    @apply cursor-default;
   }
 
-  .legend-list {
-    @apply mt-3.5 list-none p-0;
-  }
-
-  .legend-item {
-    @apply flex items-center gap-2 border-t border-border py-1.5 text-[13px];
-  }
-
-  .legend-item:first-child {
-    @apply border-t-0 pt-0;
-  }
-
+  /* 进度条/占比条(预算页与标签明细共用) */
   .legend-dot {
     @apply size-2.5 shrink-0 rounded-sm;
-  }
-
-  .legend-name {
-    @apply min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap;
-  }
-
-  .legend-amount {
-    @apply tabular-nums;
-  }
-
-  .legend-percent {
-    @apply w-12 text-right tabular-nums text-muted-foreground;
   }
 
   .bar-list {
@@ -662,14 +634,6 @@
 
   .bar-amount {
     @apply tabular-nums text-muted-foreground;
-  }
-
-  .bar-track {
-    @apply mt-1.5 h-2 overflow-hidden rounded-full border border-border bg-background;
-  }
-
-  .bar-fill {
-    @apply h-full rounded-full bg-primary;
   }
 
   /* 预算页 */

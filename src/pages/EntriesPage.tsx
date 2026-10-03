@@ -27,14 +27,23 @@ import type { AppController, AppState } from '../state/app-controller'
  * 分类/成员/标签/关键词四种筛选可组合、一键清空;
  * 仅对自己有编辑权的记录提供编辑/删除入口(管理员可改任何记录)。
  */
-export function EntriesPage({ controller, state }: { controller: AppController; state: AppState }) {
+export function EntriesPage({
+  controller,
+  state,
+  preset,
+}: {
+  controller: AppController
+  state: AppState
+  /** 统计页跳转预置的筛选(仅初始值,V9) */
+  preset?: Partial<EntryFilters>
+}) {
   const ledger = state.ledger
   const actor = state.member
   const currentMonth = todayKey().slice(0, 7)
   const { showDialog } = useDialog()
 
   const [month, setMonth] = useState(currentMonth)
-  const [filters, setFilters] = useState<EntryFilters>(EMPTY_FILTERS)
+  const [filters, setFilters] = useState<EntryFilters>(() => ({ ...EMPTY_FILTERS, ...preset }))
 
   const monthExpenses = ledger.months[month]?.expenses ?? []
   const visible = filterExpenses(ledger, monthExpenses, filters)
