@@ -1211,6 +1211,66 @@ describe('AppController 标签与标签组管理(V6)', () => {
   })
 })
 
+describe('AppController 编辑器写入(V7)', () => {
+  async function readyController(newId: () => string) {
+    const api = new FakeApi()
+    api.session = sessionOf(ADMIN)
+    api.members = [ADMIN, XIAOHONG]
+    const made = makeController({
+      api,
+      now: () => new Date('2026-10-03T08:30:00.000Z'),
+      newId,
+    })
+    await made.controller.boot()
+    return made
+  }
+
+  it('addExpense 直写 tagIds:改名后的标签仍按实体 id 命中(不经过名字派生)', async () => {
+    let seq = 0
+    const { controller, store, endpoint } = await readyController(() => `e-${++seq}`)
+    const wechat = await controller.addTag('微信')
+    await controller.renameTag(wechat.id, '支付宝')
+
+    const created = await controller.addExpense({
+      amountCents: 1500,
+      date: '2026-10-03',
+      categoryId: 'cat-dining-1',
+      tagIds: [wechat.id],
+      note: '午饭',
+    })
+
+    expect(created).toMatchObject({ id: 'e-1', amountCents: 1500, tagIds: [wechat.id] })
+    expect(controller.getLedger().meta.tags[0]?.name).toBe('支付宝')
+    expect((await store.loadLedger())?.months['2026-10']?.expenses[0]?.tagIds).toEqual([wechat.id])
+
+    await controller.retrySync()
+    expect((await endpoint.listFiles())['ledger/months/2026-10.json']?.content).toContain(wechat.id)
+  })
+
+  it('patchExpense:金额/标签/备注整体替换,写穿并同步', async () => {
+    const { controller, store } = await readyController(() => 'e-1')
+    const tag = await controller.addTag('现金')
+    await controller.addExpense({
+      amountCents: 1000,
+      date: '2026-10-03',
+      categoryId: 'cat-dining-1',
+      tagIds: [],
+      note: '旧备注',
+    })
+
+    await controller.patchExpense('e-1', {
+      amountCents: 2500,
+      tagIds: [tag.id],
+      note: null,
+    })
+
+    const updated = controller.getLedger().months['2026-10']?.expenses[0]
+    expect(updated).toMatchObject({ amountCents: 2500, tagIds: [tag.id] })
+    expect(updated?.note).toBeUndefined()
+    expect((await store.loadLedger())?.months['2026-10']?.expenses[0]?.amountCents).toBe(2500)
+  })
+})
+
 describe('AppController 修改密码(T13)', () => {
   it('登录成员透传当前密码与新密码;服务端错误原样抛出', async () => {
     const api = new FakeApi()

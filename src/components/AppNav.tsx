@@ -7,10 +7,10 @@ import MdiHomeVariant from '~icons/mdi/home-variant'
 import MdiPlus from '~icons/mdi/plus'
 import MdiWalletOutline from '~icons/mdi/wallet-outline'
 
-export type AppRoute = 'home' | 'entries' | 'stats' | 'budget' | 'me' | 'add'
+export type AppRoute = 'home' | 'entries' | 'stats' | 'budget' | 'me'
 
 interface NavItem {
-  route: Exclude<AppRoute, 'add'>
+  route: AppRoute
   label: string
   icon: ComponentType<{ className?: string }>
 }

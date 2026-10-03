@@ -76,6 +76,29 @@ export function tagManagerSections(ledger: LedgerData): TagManagerSections {
   }
 }
 
+/** 记账编辑器的标签行:每个真实组一行,未分组(有标签时)合成最后一行 */
+export interface TagSelectionRow {
+  /** null 表示合成的「未分组」行 */
+  group: TagGroup | null
+  label: string
+  color: TagColor
+  tags: Tag[]
+}
+
+export function tagSelectionRows(ledger: LedgerData): TagSelectionRow[] {
+  const sections = tagManagerSections(ledger)
+  const rows: TagSelectionRow[] = sections.groups.map(({ group, tags }) => ({
+    group,
+    label: group.name,
+    color: group.color,
+    tags,
+  }))
+  if (sections.ungrouped.length > 0) {
+    rows.push({ group: null, label: '未分组', color: UNGROUPED_COLOR, tags: sections.ungrouped })
+  }
+  return rows
+}
+
 /**
  * 列表内移动一项(上/下移),越界返回原数组的拷贝。
  * 用于标签组的简单排序按钮(不引入拖拽库)。

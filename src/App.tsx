@@ -1,10 +1,9 @@
 import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { Toaster, toast } from 'sonner'
 import { AppNav, type AppRoute } from './components/AppNav'
-import { PopupLayout, useDialog } from './components/dialog'
+import { useBillEditor } from './components/editor'
 import { SyncBadge } from './components/SyncBadge'
 import { useTheme } from './components/theme'
-import { AddExpensePage } from './pages/AddExpensePage'
 import { BudgetPage } from './pages/BudgetPage'
 import { CategoriesPage } from './pages/CategoriesPage'
 import { EntriesPage } from './pages/EntriesPage'
@@ -65,35 +64,16 @@ export default function App() {
 function Shell({ state }: { state: AppState }) {
   const [route, setRoute] = useState<AppRoute>('home')
   const [view, setView] = useState<'categories' | 'members' | 'recurring' | null>(null)
-  const { showDialog } = useDialog()
+  const openBillEditor = useBillEditor(appController)
 
   const navigate = (next: AppRoute): void => {
     setRoute(next)
     setView(null)
   }
 
-  /** FAB:记账编辑器(V7)接入前先给占位对话框,可跳转到现有表单 */
+  /** FAB 与首页「记一笔」→ 全屏记账编辑器(V7) */
   const openEditor = (): void => {
-    void showDialog<void>(
-      ({ close }) => (
-        <PopupLayout title="记一笔">
-          <p className="member-meta">
-            全屏记账编辑器(计算器键盘 / 再记)将在 v1.1 第二批接入;现在可以先用完整记账表单。
-          </p>
-          <button
-            type="button"
-            className="primary-button mt-4"
-            onClick={() => {
-              close(undefined)
-              navigate('add')
-            }}
-          >
-            打开记账表单
-          </button>
-        </PopupLayout>
-      ),
-      { label: '记一笔' },
-    )
+    void openBillEditor()
   }
 
   return (
@@ -120,7 +100,7 @@ function Shell({ state }: { state: AppState }) {
                 <HomePage
                   controller={appController}
                   state={state}
-                  onOpenAdd={() => navigate('add')}
+                  onOpenAdd={openEditor}
                   onOpenStats={() => navigate('stats')}
                   onOpenBudget={() => navigate('budget')}
                 />
@@ -139,7 +119,6 @@ function Shell({ state }: { state: AppState }) {
                   onOpenRecurring={() => setView('recurring')}
                 />
               ) : null}
-              {route === 'add' ? <AddExpensePage controller={appController} state={state} /> : null}
             </>
           ) : null}
         </div>

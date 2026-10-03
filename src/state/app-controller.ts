@@ -37,6 +37,8 @@ import {
   deleteTag as deleteTagInLedger,
   type Expense,
   type ExpenseId,
+  type ExpenseInput,
+  type ExpensePatch,
   generateDueExpenses,
   type LedgerData,
   type Member,
@@ -278,6 +280,36 @@ export class AppController {
     await this.persistLedger()
     void this.syncManager?.syncNow()
     return created
+  }
+
+  /**
+   * 全屏记账编辑器写入(V7):金额/分类/标签(id 直用,不经过名字派生,改名后的
+   * 标签实体也稳定命中)已由 features/editor 组装为领域输入;本地立即生效 →
+   * 写穿 IndexedDB → 后台同步。首次离线启动时先播种默认分类。
+   */
+  async addExpense(input: ExpenseInput): Promise<Expense> {
+    ensureCategories(this.ledger)
+    const actor = this.currentActor()
+    const newId = this.generateId()
+    addExpenseInLedger(this.ledger, input, { actor, now: this.nowIso(), newId })
+    const month = input.date.slice(0, 7)
+    const created = this.ledger.months[month]?.expenses.find((e) => e.id === newId)
+    if (!created) throw new Error('新增支出后未找到记录')
+    await this.persistLedger()
+    void this.syncManager?.syncNow()
+    return created
+  }
+
+  /** 编辑器保存编辑:补丁直接带 tagIds;领域层校验编辑权限后本地生效并后台同步 */
+  async patchExpense(id: ExpenseId, patch: ExpensePatch): Promise<void> {
+    const actor = this.currentActor()
+    updateExpenseInLedger(this.ledger, id, patch, {
+      actor,
+      now: this.nowIso(),
+      newId: this.generateId(),
+    })
+    await this.persistLedger()
+    void this.syncManager?.syncNow()
   }
 
   /**

@@ -12,6 +12,7 @@ import {
   TAG_PALETTE,
   TAG_SWATCH_ACTIVE_CLASS,
   tagManagerSections,
+  tagSelectionRows,
   tagUsageCount,
 } from './tags'
 
@@ -135,6 +136,23 @@ describe('moveItem / moveGroupId(排序按钮)', () => {
   it('moveGroupId 按 id 定位;未知 id 返回原序拷贝', () => {
     expect(moveGroupId(['g-1', 'g-2', 'g-3'], 'g-3', -1)).toEqual(['g-1', 'g-3', 'g-2'])
     expect(moveGroupId(['g-1', 'g-2'], 'g-x', 1)).toEqual(['g-1', 'g-2'])
+  })
+})
+
+describe('tagSelectionRows(编辑器标签行)', () => {
+  it('每个真实组一行(按 sortOrder),未分组合成最后一行且为空时不出现', () => {
+    const ledger = ledgerWithTags()
+    const rows = tagSelectionRows(ledger)
+
+    expect(rows.map((row) => row.label)).toEqual(['场景', '支付方式', '未分组'])
+    expect(rows[0]?.color).toBe('green')
+    expect(rows[2]?.group).toBeNull()
+    expect(rows[2]?.tags.map((tag) => tag.id)).toEqual(['tag-b'])
+
+    ledger.meta.tagGroups = [
+      { id: 'g-1', name: '全部', color: 'blue', tagIds: ['tag-a', 'tag-b', 'tag-c'] },
+    ]
+    expect(tagSelectionRows(ledger).map((row) => row.label)).toEqual(['全部'])
   })
 })
 
