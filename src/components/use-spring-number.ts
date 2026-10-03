@@ -47,8 +47,19 @@ export function useSpringNumber(target: number): number {
 
     let frame: number | null = null
     let last = performance.now()
+    let frameSeen = false
+
+    // 兜底:某些渲染环境(后台标签页/被遮挡的 embed)IAB 会饿死 rAF 但 visibilityState 仍为 visible,
+    // 首帧迟迟不来会让数值停在起始值;500ms 内没有任何帧就直接贴到目标。
+    const fallback = window.setTimeout(() => {
+      if (frameSeen) return
+      springRef.current = { value: target, velocity: 0 }
+      setDisplay(Math.round(target))
+      if (frame !== null) window.cancelAnimationFrame(frame)
+    }, 500)
 
     const tick = (now: number): void => {
+      frameSeen = true
       const dt = (now - last) / 1000
       last = now
       const next = springStep(springRef.current, target, dt)
@@ -64,6 +75,7 @@ export function useSpringNumber(target: number): number {
 
     frame = window.requestAnimationFrame(tick)
     return () => {
+      window.clearTimeout(fallback)
       if (frame !== null) window.cancelAnimationFrame(frame)
     }
   }, [target])
