@@ -1,4 +1,5 @@
 import { findCategory, findMember } from './lookup'
+import { findTag } from './tags'
 import type {
   Category,
   DateKey,
@@ -15,6 +16,12 @@ export interface ExpenseInput {
   amountCents: number
   date: DateKey
   categoryId: Category['id']
+  /** 标签实体 id(新模型);与 tagNames 同时给出时以本字段为准 */
+  tagIds?: string[]
+  /**
+   * @deprecated v1 自由标签文本;兼容旧界面写入,由迁移引擎在同步时
+   * 转换为 tagIds(见 src/domain/tag-migration.ts)。
+   */
   tagNames?: string[]
   /** 经手人,缺省为记录者本人(代记时指定他人) */
   memberId?: Member['id']
@@ -25,6 +32,9 @@ export interface ExpensePatch {
   amountCents?: number
   date?: DateKey
   categoryId?: Category['id']
+  /** 标签实体 id(新模型);给出即整体替换并丢弃废弃的 tagNames */
+  tagIds?: string[]
+  /** @deprecated v1 自由标签文本;给出即整体替换,由迁移引擎转换为 tagIds */
   tagNames?: string[]
   /** 修正经手人(记错代记对象时) */
   memberId?: MemberId
@@ -112,6 +122,20 @@ function validateForWrite(
   assertActive(findMember(ledger, input.memberId))
 }
 
+function tagsForWrite(input: {
+  tagIds?: string[]
+  tagNames?: string[]
+}): Pick<Expense, 'tagIds' | 'tagNames'> {
+  if (input.tagIds !== undefined) return { tagIds: [...input.tagIds] }
+  if (input.tagNames !== undefined) return { tagIds: [], tagNames: [...input.tagNames] }
+  return { tagIds: [] }
+}
+
+/** 写入的 tagIds 必须指向账本中已有的标签实体(unknown_tag);废弃 tagNames 路径由迁移引擎负责补建 */
+function assertKnownTagIds(ledger: LedgerData, tagIds: readonly string[]): void {
+  for (const id of tagIds) findTag(ledger, id)
+}
+
 export function addExpense(
   ledger: LedgerData,
   input: ExpenseInput,
@@ -120,13 +144,14 @@ export function addExpense(
   assertActive(ctx.actor)
   const memberId = input.memberId ?? ctx.actor.id
   validateForWrite(ledger, { ...input, memberId })
+  if (input.tagIds !== undefined) assertKnownTagIds(ledger, input.tagIds)
 
   const expense: Expense = {
     id: ctx.newId,
     amountCents: input.amountCents,
     date: input.date,
     categoryId: input.categoryId,
-    tagNames: input.tagNames ? [...input.tagNames] : [],
+    ...tagsForWrite(input),
     memberId,
     recordedBy: ctx.actor.id,
     note: input.note,
@@ -148,12 +173,20 @@ export function updateExpense(
   assertActive(ctx.actor)
   const { month, expense } = findExpense(ledger, id)
   assertCanEdit(ctx.actor, expense)
+  if (patch.tagIds !== undefined) assertKnownTagIds(ledger, patch.tagIds)
 
   const next: Expense = { ...expense }
   if (patch.amountCents !== undefined) next.amountCents = patch.amountCents
   if (patch.date !== undefined) next.date = patch.date
   if (patch.categoryId !== undefined) next.categoryId = patch.categoryId
-  if (patch.tagNames !== undefined) next.tagNames = [...patch.tagNames]
+  if (patch.tagIds !== undefined) {
+    next.tagIds = [...patch.tagIds]
+    // 新模型写入即视为完成转换,丢弃废弃字段,避免迁移时把已取消的旧标签带回
+    delete next.tagNames
+  } else if (patch.tagNames !== undefined) {
+    next.tagNames = [...patch.tagNames]
+    next.tagIds = []
+  }
   if (patch.memberId !== undefined) next.memberId = patch.memberId
   if (patch.note !== undefined) next.note = patch.note === null ? undefined : patch.note
   validateForWrite(ledger, next)

@@ -146,7 +146,7 @@ describe('nextDueDate', () => {
 })
 
 describe('generateDueExpenses', () => {
-  it('按确定性 id 补记到期支出:note 默认、经手人与记录者取自规则', () => {
+  it('按确定性 id 补记到期支出:note 默认、经手人与记录者取自规则、标签用规则 tagIds', () => {
     const ledger = fixtureLedger()
     const rule = makeRule({
       id: 'r-rent',
@@ -156,7 +156,7 @@ describe('generateDueExpenses', () => {
       memberId: ADMIN.id,
       createdBy: XIAOHONG.id,
       note: '房租',
-      tagNames: ['转账'],
+      tagIds: ['tag-transfer'],
     })
     ledger.meta.recurring = [rule]
 
@@ -171,8 +171,10 @@ describe('generateDueExpenses', () => {
       memberId: ADMIN.id,
       recordedBy: XIAOHONG.id,
       note: '房租',
-      tagNames: ['转账'],
+      tagIds: ['tag-transfer'],
     })
+    // 生成支出不再携带废弃 tagNames(评审修复:避免旧表示在合并中来回翻转)
+    expect(expense && 'tagNames' in expense).toBe(false)
 
     const defaultNote = makeRule({ id: 'r-fixed', frequency: 'daily', startDate: '2026-10-01' })
     ledger.meta.recurring.push(defaultNote)
@@ -181,6 +183,20 @@ describe('generateDueExpenses', () => {
       item.id.startsWith('rec-r-fixed-'),
     )
     expect(generated?.note).toBe(RECURRING_DEFAULT_NOTE)
+    expect(generated?.tagIds).toEqual([])
+  })
+
+  it('旧规则只有 tagNames 时生成支出不再复制该字段,标签不会二次迁移', () => {
+    const ledger = fixtureLedger()
+    ledger.meta.recurring = [
+      makeRule({ id: 'r-legacy', frequency: 'daily', startDate: '2026-10-01', tagNames: ['转账'] }),
+    ]
+
+    generateDueExpenses(ledger, '2026-10-01', NOW)
+
+    const generated = ledger.months['2026-10']?.expenses[0]
+    expect(generated?.tagIds).toEqual([])
+    expect(generated && 'tagNames' in generated).toBe(false)
   })
 
   it('重复执行幂等:已存在同 id(含手工/其他设备生成)不再补记', () => {

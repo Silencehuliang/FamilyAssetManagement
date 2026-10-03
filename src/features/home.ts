@@ -72,7 +72,7 @@ export function homeBillGroups(ledger: LedgerData, limit = HOME_BILL_LIMIT): Day
     if (a.createdAt !== b.createdAt) return a.createdAt < b.createdAt ? 1 : -1
     return a.id < b.id ? -1 : a.id > b.id ? 1 : 0
   })
-  const groups = groupByDay(all.slice(0, Math.max(0, limit)))
+  const groups = groupByDay(ledger, all.slice(0, Math.max(0, limit)))
   const totalByDate = new Map<DateKey, number>()
   for (const expense of all) {
     totalByDate.set(expense.date, (totalByDate.get(expense.date) ?? 0) + expense.amountCents)

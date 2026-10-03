@@ -21,6 +21,7 @@ import type {
   MemberId,
   RecurringExpense,
   RecurringId,
+  TagId,
 } from './types'
 import { DomainError } from './types'
 
@@ -197,7 +198,8 @@ export function generateDueExpenses(
         amountCents: rule.amountCents,
         date,
         categoryId: rule.categoryId,
-        tagNames: [...rule.tagNames],
+        // 只带规则上的标签实体 id;旧规则的 tagNames 不再复制到生成支出(评审修复)
+        tagIds: [...(rule.tagIds ?? [])],
         memberId: rule.memberId,
         recordedBy: rule.createdBy ?? rule.memberId,
         note: rule.note ?? RECURRING_DEFAULT_NOTE,
@@ -216,6 +218,9 @@ export function generateDueExpenses(
 export interface RecurringInput {
   amountCents: number
   categoryId: CategoryId
+  /** 补记支出携带的标签实体 id(新模型) */
+  tagIds?: TagId[]
+  /** @deprecated v1 自由标签文本;旧表单保存时由 AppController 补建实体并转为 tagIds */
   tagNames?: string[]
   /** 经手人,缺省为创建者本人 */
   memberId?: MemberId
@@ -229,6 +234,7 @@ export interface RecurringInput {
 export interface RecurringPatch {
   amountCents?: number
   categoryId?: CategoryId
+  tagIds?: TagId[]
   tagNames?: string[]
   memberId?: MemberId
   /** 传 null 清除备注;缺省表示不改动 */
@@ -313,6 +319,7 @@ export function addRecurring(
     id: ctx.newId,
     amountCents: input.amountCents,
     categoryId: input.categoryId,
+    tagIds: input.tagIds ? [...input.tagIds] : [],
     tagNames: input.tagNames ? [...input.tagNames] : [],
     memberId,
     note: input.note,
@@ -340,6 +347,7 @@ export function updateRecurring(
   const next: RecurringExpense = { ...rule }
   if (patch.amountCents !== undefined) next.amountCents = patch.amountCents
   if (patch.categoryId !== undefined) next.categoryId = patch.categoryId
+  if (patch.tagIds !== undefined) next.tagIds = [...patch.tagIds]
   if (patch.tagNames !== undefined) next.tagNames = [...patch.tagNames]
   if (patch.memberId !== undefined) next.memberId = patch.memberId
   if (patch.note !== undefined) next.note = patch.note === null ? undefined : patch.note

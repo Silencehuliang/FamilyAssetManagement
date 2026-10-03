@@ -37,7 +37,7 @@ export function EntriesPage({ controller, state }: { controller: AppController; 
 
   const monthExpenses = ledger.months[month]?.expenses ?? []
   const visible = filterExpenses(ledger, monthExpenses, filters)
-  const groups = groupByDay(visible)
+  const groups = groupByDay(ledger, visible)
   const options = monthOptions(ledger, month, currentMonth)
   const tags = tagsOfMonth(ledger, month)
   const { parents, childrenByParent } = groupCategories(ledger.meta.categories)

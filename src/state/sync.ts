@@ -4,17 +4,21 @@
  *   离线删除由持久化队列显式回放(见 src/sync/queue.ts);
  * - 首次同步到空远端(从未有过 categories.json)且本地无分类时,播种 DEFAULT_CATEGORIES 并推送,
  *   让家人首次登录就能看到分类;
+ * - 每轮合并后运行标签迁移(ADR-0006):把旧支出的 tagNames 确定性转成标签实体 + tagIds,
+ *   并立即差分推送迁移结果,保证多设备经 LWW 收敛;
  * - 状态机暴露给界面:offline | syncing | synced | error(带最后错误信息);
  * - 并发调用合并为同一轮(界面进入即触发 + 在线事件 + 手动重试可能叠加)。
  */
 import { ApiError } from '../api/client'
-import { DEFAULT_CATEGORIES, type LedgerData, type Role } from '../domain'
+import { DEFAULT_CATEGORIES, type LedgerData, migrateLegacyTagNames, type Role } from '../domain'
 import { errorText } from '../lib/errors'
 import type { SyncEndpoint } from '../sync'
 import {
   type AdminFilesPolicy,
   CATEGORIES_FILE,
+  ledgerToFiles,
   type PendingQueue,
+  pushFiles,
   replay,
   SyncConflictError,
   type SyncResult,
@@ -33,6 +37,8 @@ export interface SyncManagerDeps {
   getRole?: () => Role | undefined
   /** 默认读 navigator.onLine;测试注入 */
   isOnline?: () => boolean
+  /** 当前时间(标签迁移写 updatedAt);测试注入,缺省取本机时钟 */
+  now?: () => Date
   /** 状态变化回调(界面刷新徽标) */
   onStatus?: (status: SyncStatus, error?: string) => void
   /** 一轮同步成功后的收尾(把账本/队列写穿到本地存储) */
@@ -144,9 +150,30 @@ export class SyncManager {
     const result = await replay(this.deps.queue, this.deps.ledger, this.deps.endpoint, {
       adminFilesPolicy: this.adminFilesPolicy(),
     })
+
+    // 合并后运行标签迁移(ADR-0006):旧 tagNames → 标签实体 + tagIds。幂等:
+    // 第二遍找不到 tagNames,不做任何改动。迁移是表示转换,不刷新支出 updatedAt;
+    // 为避免与其他设备上的旧表示在 id 并集合并中来回翻转(同刻冲突按 JSON 字典序,
+    // 旧表示可能胜出),迁移后立刻差分推送本轮受影响文件。
+    const migration = await migrateLegacyTagNames(this.deps.ledger, this.nowIso())
+    if (migration.migratedExpenses > 0) {
+      const after = ledgerToFiles(this.deps.ledger)
+      const remoteFiles = await this.deps.endpoint.listFiles()
+      result.pushedFiles += await pushFiles(
+        this.deps.endpoint,
+        after,
+        remoteFiles,
+        Object.keys(after),
+      )
+    }
+
     await this.deps.onSynced?.(result)
     this.setStatus('synced')
     return result
+  }
+
+  private nowIso(): string {
+    return (this.deps.now ?? (() => new Date()))().toISOString()
   }
 
   /** 成员端 remote-wins(采纳管理员维护的分类/预算),管理员端 local-wins(保住自己的编辑) */

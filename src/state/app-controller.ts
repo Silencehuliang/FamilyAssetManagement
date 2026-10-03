@@ -37,6 +37,7 @@ import {
   type LedgerData,
   type Member,
   type MonthKey,
+  normalizeLedgerShape,
   type RecurringExpense,
   type RecurringId,
   type RecurringInput,
@@ -47,6 +48,7 @@ import {
   updateCategory as updateCategoryInLedger,
   updateExpense as updateExpenseInLedger,
   updateRecurring as updateRecurringInLedger,
+  upsertTagsByName,
 } from '../domain'
 import { DomainError } from '../domain/types'
 import { nextSortOrder } from '../features/categories'
@@ -55,6 +57,7 @@ import {
   buildExpensePatch,
   type EntryForm,
   ensureCategories,
+  splitTags,
   todayKey,
 } from '../features/entry'
 import { errorText } from '../lib/errors'
@@ -151,10 +154,18 @@ export class AppController {
     this.booted = true
     try {
       const cachedLedger = await this.store.loadLedger()
-      if (cachedLedger) this.ledger = cachedLedger
+      if (cachedLedger) {
+        // v1 缓存没有 meta.tags/meta.tagGroups(评审修复):采纳前先规范化,
+        // 否则 mergeTimestamped(undefined, …) 抛错会被吞成永久离线、迁移不运行
+        this.ledger = normalizeLedgerShape(cachedLedger)
+      }
       const cachedMembers = await this.store.loadMembers()
       if (cachedMembers && this.ledger.meta.members.length === 0) {
         this.ledger.meta.members = cachedMembers
+      }
+      if (cachedLedger) {
+        // 把补全后的形状立即写回缓存,下次启动/其他读取方看到当前形状
+        await this.store.saveLedger(this.ledger)
       }
       this.queue = await PersistentQueue.hydrate(this.store)
     } catch (err) {
@@ -235,12 +246,14 @@ export class AppController {
   /**
    * 记一笔:表单 → 领域输入 → addExpense(本地即时生效)→ 写穿 IndexedDB →
    * 触发一轮同步(不阻塞界面,状态徽标随 SyncManager 变化)。
+   * 旧编辑器的自由文本标签先按确定性 id 补建实体,写入只引用 tagIds(评审修复)。
    */
   async recordExpense(form: EntryForm): Promise<Expense> {
     ensureCategories(this.ledger)
     const actor = this.currentActor()
-    const input = buildExpenseInput(this.ledger, form, actor.id)
     const now = this.nowIso()
+    await upsertTagsByName(this.ledger, splitTags(form.tagsText), now)
+    const input = await buildExpenseInput(this.ledger, form, actor.id)
     const newId = this.generateId()
     addExpense(this.ledger, input, { actor, now, newId })
 
@@ -256,13 +269,16 @@ export class AppController {
   /**
    * 修改一笔(明细页编辑):领域层校验「管理员/经手人/记录者」权限,
    * 本地立即生效 → 写穿 IndexedDB → 后台同步(LWW 传播,无需队列)。
+   * 标签同样先补建实体再以 tagIds 整体替换(评审修复:不得清空已迁移标签)。
    */
   async updateExpense(id: ExpenseId, form: EntryForm): Promise<void> {
     const actor = this.currentActor()
-    const patch = buildExpensePatch(this.ledger, form)
+    const now = this.nowIso()
+    await upsertTagsByName(this.ledger, splitTags(form.tagsText), now)
+    const patch = await buildExpensePatch(this.ledger, form)
     updateExpenseInLedger(this.ledger, id, patch, {
       actor,
-      now: this.nowIso(),
+      now,
       newId: this.generateId(),
     })
     await this.persistLedger()
@@ -380,11 +396,18 @@ export class AppController {
   /**
    * 新增周期支出规则(T12):任何启用成员可创建,createdBy 为创建者;
    * 保存后台同步,补记由 enterApp/每轮同步后的 materializeRecurring 完成。
+   * 旧表单的自由文本 tagNames 先补建实体并转为 tagIds(评审修复)。
    */
   async addRecurring(input: RecurringInput): Promise<RecurringExpense> {
     const actor = this.currentActor()
     const id = this.generateId()
-    addRecurringInLedger(this.ledger, input, { actor, now: this.nowIso(), newId: id })
+    const now = this.nowIso()
+    const next = { ...input }
+    if (next.tagNames !== undefined) {
+      next.tagIds = await this.upsertTagNames(next.tagNames, now)
+      delete next.tagNames
+    }
+    addRecurringInLedger(this.ledger, next, { actor, now, newId: id })
     const created = this.ledger.meta.recurring.find((rule) => rule.id === id)
     if (!created) throw new Error('新增周期支出后未找到规则')
     await this.persistLedger()
@@ -394,13 +417,19 @@ export class AppController {
 
   /**
    * 修改周期支出规则(T12,创建者/经手人/管理员):只影响之后的期次,
-   * 已生成的支出因确定性 id 命中而保留原值。
+   * 已生成的支出因确定性 id 命中而保留原值。旧表单 tagNames 同样转为 tagIds。
    */
   async updateRecurring(id: RecurringId, patch: RecurringPatch): Promise<void> {
     const actor = this.currentActor()
-    updateRecurringInLedger(this.ledger, id, patch, {
+    const now = this.nowIso()
+    const next = { ...patch }
+    if (next.tagNames !== undefined) {
+      next.tagIds = await this.upsertTagNames(next.tagNames, now)
+      delete next.tagNames
+    }
+    updateRecurringInLedger(this.ledger, id, next, {
       actor,
-      now: this.nowIso(),
+      now,
       newId: this.generateId(),
     })
     await this.persistLedger()
@@ -465,6 +494,12 @@ export class AppController {
 
   private generateId(): string {
     return (this.deps.newId ?? (() => crypto.randomUUID()))()
+  }
+
+  /** 旧编辑器的标签文本 → 补建实体 → tagIds(确定性 id;见 domain/tags.ts) */
+  private async upsertTagNames(names: readonly string[], now: string): Promise<string[]> {
+    const tags = await upsertTagsByName(this.ledger, names, now)
+    return tags.map((tag) => tag.id)
   }
 
   private currentActor(): Member {

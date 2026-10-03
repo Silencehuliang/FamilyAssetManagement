@@ -10,8 +10,15 @@ import type {
   StoredSession,
 } from '../api'
 import { ApiError } from '../api/client'
-import { addExpense, type Member } from '../domain'
+import {
+  addExpense,
+  DEFAULT_CATEGORIES,
+  type LedgerData,
+  type Member,
+  tagIdFromName,
+} from '../domain'
 import { ADMIN, fixtureLedger, LUNCH_CATEGORY, NOW, XIAOHONG } from '../domain/fixtures'
+import { expenseToForm } from '../features/entries'
 import { MemoryLocalStore } from '../storage'
 import { InMemoryEndpoint } from '../sync'
 import { type AppApi, AppController } from './app-controller'
@@ -256,6 +263,70 @@ describe('AppController 启动流程', () => {
   })
 })
 
+describe('v1 缓存升级路径(评审修复)', () => {
+  it('boot 规范化缺 tags/tagGroups 的旧缓存:同步成功、迁移运行、标签出现并写回缓存', async () => {
+    const api = new FakeApi()
+    api.session = sessionOf(ADMIN)
+    api.members = [ADMIN, XIAOHONG]
+    const store = new MemoryLocalStore()
+    // v1 形状:meta 没有 tags/tagGroups;支出只有废弃的自由文本 tagNames
+    const v1 = {
+      meta: {
+        members: [ADMIN, XIAOHONG],
+        categories: structuredClone(DEFAULT_CATEGORIES),
+        budgets: {},
+        recurring: [],
+      },
+      months: {
+        '2026-10': {
+          expenses: [
+            {
+              id: 'e-legacy',
+              amountCents: 1000,
+              date: '2026-10-02',
+              categoryId: 'cat-dining-2',
+              tagNames: ['微信', '现金'],
+              memberId: ADMIN.id,
+              recordedBy: ADMIN.id,
+              createdAt: NOW,
+              updatedAt: NOW,
+            },
+          ],
+        },
+      },
+    } as unknown as LedgerData
+    await store.saveLedger(v1)
+    const { controller, endpoint } = makeController({
+      api,
+      store,
+      now: () => new Date('2026-10-02T08:30:00.000Z'),
+      today: () => '2026-10-02',
+    })
+
+    await controller.boot()
+
+    // 旧缓存缺 tags 时合并若抛错会被吞成离线;这里必须完成一轮同步并运行迁移
+    expect(controller.getState().syncStatus).toBe('synced')
+    const wechat = await tagIdFromName('微信')
+    const cash = await tagIdFromName('现金')
+    const ledger = controller.getLedger()
+    expect(ledger.meta.tags.map((t) => t.id).sort()).toEqual([wechat, cash].sort())
+    const expense = ledger.months['2026-10']?.expenses[0]
+    expect(expense?.tagIds.slice().sort()).toEqual([wechat, cash].sort())
+    expect(expense && 'tagNames' in expense).toBe(false)
+
+    // 规范化后的形状已写回本地缓存(下次启动不再从旧形状起步)
+    const persisted = await store.loadLedger()
+    expect(persisted?.meta.tagGroups).toEqual([])
+    expect(persisted?.meta.tags).toHaveLength(2)
+
+    // 迁移结果推送到远端:tags.json 出现且不含废弃字段
+    const files = await endpoint.listFiles()
+    expect(files['ledger/meta/tags.json']?.content).toContain('微信')
+    expect(files['ledger/months/2026-10.json']?.content).not.toContain('tagNames')
+  })
+})
+
 describe('AppController 登录与初始化', () => {
   it('初始化成功 → 主界面并保存会话', async () => {
     const api = new FakeApi()
@@ -357,6 +428,8 @@ describe('AppController 记一笔(T6)', () => {
 
   it('默认经手人为登录成员;写穿本地并同步到端点', async () => {
     const { controller, store, endpoint } = await readyController()
+    const wechat = await tagIdFromName('微信')
+    const cash = await tagIdFromName('现金')
 
     const expense = await controller.recordExpense(baseForm)
 
@@ -366,15 +439,23 @@ describe('AppController 记一笔(T6)', () => {
       memberId: ADMIN.id,
       recordedBy: ADMIN.id,
       note: '食堂',
-      tagNames: ['微信', '现金'],
+      tagIds: [wechat, cash],
     })
+    expect(expense).not.toHaveProperty('tagNames')
+    // 旧编辑器的标签文本已按确定性 id 补建实体(评审修复:旧编辑兼容层 tagId 化)
+    expect(controller.getLedger().meta.tags).toEqual([
+      { id: wechat, name: '微信', updatedAt: '2026-10-02T08:30:00.000Z' },
+      { id: cash, name: '现金', updatedAt: '2026-10-02T08:30:00.000Z' },
+    ])
     const persisted = await store.loadLedger()
     expect(persisted?.months['2026-10']?.expenses).toHaveLength(1)
+    expect(persisted?.meta.tags).toHaveLength(2)
 
     // recordExpense 的同步是 fire-and-forget;retrySync 会复用进行中的一轮并等待它
     await controller.retrySync()
     const files = await endpoint.listFiles()
     expect(files['ledger/months/2026-10.json']?.content).toContain('"amountCents": 1250')
+    expect(files['ledger/meta/tags.json']?.content).toContain('微信')
   })
 
   it('可代其他成员记录:memberId 为经手人,recordedBy 仍为记录者', async () => {
@@ -450,14 +531,66 @@ describe('AppController 明细页编辑与删除(T7)', () => {
       categoryId: 'cat-dining-3',
       memberId: XIAOHONG.id,
       recordedBy: ADMIN.id,
-      tagNames: [],
+      tagIds: [],
     })
+    expect(updated && 'tagNames' in updated).toBe(false)
     expect(updated?.note).toBeUndefined()
     expect((await store.loadLedger())?.months['2026-10']?.expenses[0]?.amountCents).toBe(2000)
 
     await controller.retrySync()
     const files = await endpoint.listFiles()
     expect(files['ledger/months/2026-10.json']?.content).toContain('"amountCents": 2000')
+  })
+
+  it('旧编辑器编辑已迁移支出:标签以实体 id 保留,tagNames 不复活(评审回归)', async () => {
+    const api = new FakeApi()
+    api.session = sessionOf(ADMIN)
+    api.members = [ADMIN, XIAOHONG]
+    const store = new MemoryLocalStore()
+    const wechat = await tagIdFromName('微信')
+    const seed = fixtureLedger()
+    seed.meta.tags = [{ id: wechat, name: '微信', updatedAt: NOW }]
+    seed.months = {
+      '2026-10': {
+        expenses: [
+          {
+            id: 'e-migrated',
+            amountCents: 1000,
+            date: '2026-10-02',
+            categoryId: 'cat-dining-2',
+            tagIds: [wechat],
+            memberId: ADMIN.id,
+            recordedBy: ADMIN.id,
+            createdAt: NOW,
+            updatedAt: NOW,
+          },
+        ],
+      },
+    }
+    await store.saveLedger(seed)
+    const { controller } = makeController({
+      api,
+      store,
+      now: () => new Date('2026-10-02T08:30:00.000Z'),
+    })
+    await controller.boot()
+
+    // 旧编辑器回填:按实体把 tagIds 解析成名字
+    const before = controller.getLedger().months['2026-10']?.expenses[0]
+    if (!before) throw new Error('fixture: 支出缺失')
+    expect(expenseToForm(controller.getLedger(), before).tagsText).toBe('微信')
+
+    await controller.updateExpense('e-migrated', {
+      ...baseForm,
+      amountText: '12.5',
+      tagsText: '微信',
+    })
+
+    const updated = controller.getLedger().months['2026-10']?.expenses[0]
+    expect(updated?.tagIds).toEqual([wechat])
+    expect(updated && 'tagNames' in updated).toBe(false)
+    // 实体未被重复创建,也没有因旧编辑器的空 tagNames 被清掉
+    expect(controller.getLedger().meta.tags).toEqual([{ id: wechat, name: '微信', updatedAt: NOW }])
   })
 
   it('updateExpense:改他人的记录被领域层拒绝,记录保持原样', async () => {
@@ -755,6 +888,31 @@ describe('AppController 周期支出(T12)', () => {
     expect(files['ledger/meta/recurring.json']?.content).toContain('"r-fixed"')
     expect(files['ledger/months/2026-08.json']?.content).toContain('rec-r-fixed-2026-08-31')
     expect((await store.loadLedger())?.months['2026-08']?.expenses).toHaveLength(1)
+  })
+
+  it('旧周期表单的 tagNames 保存时补建实体并转为 tagIds(评审修复)', async () => {
+    const { controller } = await readyController(ADMIN, () => 'r-legacy')
+
+    const created = await controller.addRecurring({
+      amountCents: 1000,
+      categoryId: 'cat-dining-2',
+      tagNames: ['微信'],
+      frequency: 'monthly',
+      startDate: '2026-11-01',
+    })
+
+    const wechat = await tagIdFromName('微信')
+    const cash = await tagIdFromName('现金')
+    expect(created.tagIds).toEqual([wechat])
+    expect(created.tagNames).toEqual([])
+    expect(controller.getLedger().meta.tags).toEqual([
+      { id: wechat, name: '微信', updatedAt: '2026-10-02T08:30:00.000Z' },
+    ])
+
+    await controller.updateRecurring('r-legacy', { tagNames: ['现金'] })
+    const rule = controller.getLedger().meta.recurring[0]
+    expect(rule?.tagIds).toEqual([cash])
+    expect(rule?.tagNames).toEqual([])
   })
 
   it('打开应用即补记缓存账本中错过的期次(无需先手动同步)', async () => {

@@ -1,13 +1,24 @@
-import type { Budget, Category, Expense, LedgerData, MonthKey, RecurringExpense } from '../domain'
+import type {
+  Budget,
+  Category,
+  Expense,
+  LedgerData,
+  MonthKey,
+  RecurringExpense,
+  Tag,
+  TagGroup,
+} from '../domain'
 import { createEmptyLedger } from '../domain'
 
 /**
- * 账本内存形态与仓库文件的映射(ADR-0005)。
+ * 账本内存形态与仓库文件的映射(ADR-0005/0006)。
  *
  * 文件清单:
  * - `ledger/months/<YYYY-MM>.json`:`{"expenses": [...]}`,按自然月一个文件;空月份不落文件
  * - (members.json 由服务端专属管理,不进入客户端同步文件集 —— ADR-0005/0006)
  * - `ledger/meta/categories.json`:`{"categories": [...]}`
+ * - `ledger/meta/tags.json`:`{"tags": [{id,name,updatedAt}]}`(成员可写)
+ * - `ledger/meta/tagGroups.json`:`{"groups": [{id,name,color,tagIds,...}]}`(管理员专属)
  * - `ledger/meta/budgets.json`:`{"budgets": {"<YYYY-MM>": {...}}}`
  * - `ledger/meta/recurring.json`:`{"recurring": [...]}`
  *
@@ -15,6 +26,8 @@ import { createEmptyLedger } from '../domain'
  */
 
 export const CATEGORIES_FILE = 'ledger/meta/categories.json'
+export const TAGS_FILE = 'ledger/meta/tags.json'
+export const TAG_GROUPS_FILE = 'ledger/meta/tagGroups.json'
 export const BUDGETS_FILE = 'ledger/meta/budgets.json'
 export const RECURRING_FILE = 'ledger/meta/recurring.json'
 
@@ -35,6 +48,8 @@ export function isLedgerFilePath(path: string): boolean {
   return (
     MONTH_FILE_RE.test(path) ||
     path === CATEGORIES_FILE ||
+    path === TAGS_FILE ||
+    path === TAG_GROUPS_FILE ||
     path === BUDGETS_FILE ||
     path === RECURRING_FILE
   )
@@ -54,7 +69,7 @@ function withSortedMonthKeys(budgets: Record<MonthKey, Budget>): Record<MonthKey
 }
 
 /**
- * 账本 → 文件。空月份不产生文件;四个 meta 文件恒在(空集合也写出)。
+ * 账本 → 文件。空月份不产生文件;五个 meta 文件恒在(空集合也写出)。
  * 与 filesToLedger 互逆(对不含空月份条目的账本严格成立)。
  */
 export function ledgerToFiles(ledger: LedgerData): Record<string, string> {
@@ -65,6 +80,8 @@ export function ledgerToFiles(ledger: LedgerData): Record<string, string> {
     files[monthFilePath(month)] = serialize({ expenses: data.expenses })
   }
   files[CATEGORIES_FILE] = serialize({ categories: ledger.meta.categories })
+  files[TAGS_FILE] = serialize({ tags: ledger.meta.tags })
+  files[TAG_GROUPS_FILE] = serialize({ groups: ledger.meta.tagGroups })
   files[BUDGETS_FILE] = serialize({ budgets: withSortedMonthKeys(ledger.meta.budgets) })
   files[RECURRING_FILE] = serialize({ recurring: ledger.meta.recurring })
   return files
@@ -112,6 +129,16 @@ export function filesToLedger(files: Record<string, string>): LedgerData {
   const categories = files[CATEGORIES_FILE]
   if (categories !== undefined) {
     ledger.meta.categories = arrayField<Category>(CATEGORIES_FILE, categories, 'categories')
+  }
+
+  const tags = files[TAGS_FILE]
+  if (tags !== undefined) {
+    ledger.meta.tags = arrayField<Tag>(TAGS_FILE, tags, 'tags')
+  }
+
+  const tagGroups = files[TAG_GROUPS_FILE]
+  if (tagGroups !== undefined) {
+    ledger.meta.tagGroups = arrayField<TagGroup>(TAG_GROUPS_FILE, tagGroups, 'groups')
   }
 
   const recurring = files[RECURRING_FILE]

@@ -39,6 +39,8 @@ export function fixtureLedger(): LedgerData {
     meta: {
       members: [ADMIN, XIAOHONG, LAOSAN, DALI],
       categories: structuredClone(DEFAULT_CATEGORIES),
+      tags: [],
+      tagGroups: [],
       budgets: {},
       recurring: [],
     },

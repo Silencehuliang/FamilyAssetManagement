@@ -13,6 +13,7 @@ import {
   type ExpensePatch,
   type LedgerData,
   type MonthKey,
+  tagIdsFromNames,
 } from '../domain'
 import { DomainError } from '../domain/types'
 
@@ -107,20 +108,22 @@ export function groupCategories(categories: Category[]): {
 
 /**
  * 表单 → 领域输入。校验金额、日期与必选子分类;经手人缺省为记录者本人(代记时显式指定)。
- * 领域层仍会做二道校验(成员存在/启用、金额为正)。
+ * 标签文本(名字)经确定性 id 派生为 tagIds —— 旧编辑器不再写废弃的 tagNames;
+ * 调用方负责在领域写入前用 upsertTagsByName 补建实体(见 AppController)。
+ * 领域层仍会做二道校验(成员存在/启用、金额为正、标签实体存在)。
  */
-export function buildExpenseInput(
+export async function buildExpenseInput(
   ledger: LedgerData,
   form: EntryForm,
   defaultMemberId: string,
-): ExpenseInput {
+): Promise<ExpenseInput> {
   const { amountCents, date, categoryId, tagNames } = parseFormFields(ledger, form)
   const note = form.note.trim()
   return {
     amountCents,
     date,
     categoryId,
-    tagNames,
+    tagIds: await tagIdsFromNames(tagNames),
     memberId: form.memberId === '' ? defaultMemberId : form.memberId,
     note: note === '' ? undefined : note,
   }
@@ -128,16 +131,20 @@ export function buildExpenseInput(
 
 /**
  * 表单 → 领域更新补丁(明细页编辑)。校验与新增一致;备注清空传 null,
- * 空字符串的经手人表示保持原值(不修改归属)。
+ * 空字符串的经手人表示保持原值(不修改归属)。标签同样只产出 tagIds:
+ * 修复旧编辑器用空 tagNames 清空已迁移标签的问题(评审回归)。
  */
-export function buildExpensePatch(ledger: LedgerData, form: EntryForm): ExpensePatch {
+export async function buildExpensePatch(
+  ledger: LedgerData,
+  form: EntryForm,
+): Promise<ExpensePatch> {
   const { amountCents, date, categoryId, tagNames } = parseFormFields(ledger, form)
   const note = form.note.trim()
   return {
     amountCents,
     date,
     categoryId,
-    tagNames,
+    tagIds: await tagIdsFromNames(tagNames),
     memberId: form.memberId === '' ? undefined : form.memberId,
     note: note === '' ? null : note,
   }

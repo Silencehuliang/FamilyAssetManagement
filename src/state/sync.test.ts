@@ -10,6 +10,7 @@ import {
   ledgerToFiles,
   monthFilePath,
   PendingQueue,
+  TAGS_FILE,
 } from '../sync'
 import { SyncManager, type SyncStatus } from './sync'
 
@@ -43,6 +44,7 @@ function makeManager(options: {
   queue?: PendingQueue
   online?: () => boolean
   role?: 'admin' | 'member'
+  now?: () => Date
 }) {
   const statuses: SyncStatus[] = []
   const ledger = options.ledger ?? fixtureLedger()
@@ -52,6 +54,7 @@ function makeManager(options: {
     ledger,
     getRole: () => options.role,
     isOnline: options.online,
+    now: options.now,
     onStatus: (status) => statuses.push(status),
   })
   return { manager, ledger, statuses }
@@ -268,5 +271,84 @@ describe('乐观并发冲突自动重跑(评审回归)', () => {
 
     expect(manager.status).toBe('synced')
     expect(statuses.at(-1)).toBe('synced')
+  })
+})
+
+describe('标签迁移接线(ADR-0006)', () => {
+  const MIGRATION_NOW = () => new Date('2026-10-02T09:00:00.000Z')
+
+  function legacyManager() {
+    const ledger = fixtureLedger()
+    addExpense(
+      ledger,
+      {
+        amountCents: 1200,
+        date: '2026-10-02',
+        categoryId: LUNCH_CATEGORY,
+        tagNames: ['微信', '现金'],
+      },
+      { actor: XIAOHONG, now: NOW, newId: 'e-legacy' },
+    )
+    const endpoint = new InMemoryEndpoint()
+    const { manager } = makeManager({ ledger, endpoint, now: MIGRATION_NOW })
+    return { ledger, endpoint, manager }
+  }
+
+  async function contentsOf(endpoint: InMemoryEndpoint): Promise<Record<string, string>> {
+    const files = await endpoint.listFiles()
+    const contents: Record<string, string> = {}
+    for (const [path, file] of Object.entries(files)) contents[path] = file.content
+    return contents
+  }
+
+  it('同步后旧 tagNames 迁移为标签实体 + tagIds 并推送;第二遍幂等无增量', async () => {
+    const { ledger, endpoint, manager } = legacyManager()
+
+    await manager.syncNow()
+
+    expect(manager.status).toBe('synced')
+    const expense = ledger.months['2026-10']?.expenses[0]
+    expect(expense?.tagNames).toBeUndefined()
+    expect(expense?.tagIds).toHaveLength(2)
+    expect(expense?.updatedAt).toBe(NOW) // 迁移是表示转换,不刷新支出时间戳
+    expect(ledger.meta.tags.map((t) => t.name).sort()).toEqual(['微信', '现金'])
+
+    const files = await contentsOf(endpoint)
+    expect(files[TAGS_FILE]).toContain('"微信"')
+    expect(files[TAGS_FILE]).toContain('"现金"')
+    expect(files[monthFilePath('2026-10')]).toContain('tagIds')
+    expect(files[monthFilePath('2026-10')]).not.toContain('tagNames')
+
+    const idle = await manager.syncNow()
+    expect(idle).toEqual({ pulledFiles: 0, pushedFiles: 0, conflictsResolved: 0 })
+  })
+
+  it('远端仍有旧表示时合并不来回翻转:迁移后立即差分推送,远端落库为新表示', async () => {
+    const { ledger, endpoint, manager } = legacyManager()
+    await manager.syncNow()
+
+    // 另一台尚未迁移的设备把同刻旧表示写回端点(id 并集 + JSON 字典序会选中旧表示)
+    const stale = fixtureLedger()
+    addExpense(
+      stale,
+      {
+        amountCents: 1200,
+        date: '2026-10-02',
+        categoryId: LUNCH_CATEGORY,
+        tagNames: ['微信', '现金'],
+      },
+      { actor: XIAOHONG, now: NOW, newId: 'e-legacy' },
+    )
+    const staleMonth = ledgerToFiles(stale)[monthFilePath('2026-10')]
+    if (!staleMonth) throw new Error('测试辅助:旧月份内容缺失')
+    endpoint.assignFile(monthFilePath('2026-10'), staleMonth)
+
+    await manager.syncNow()
+
+    expect(ledger.months['2026-10']?.expenses[0]?.tagNames).toBeUndefined()
+    expect(ledger.months['2026-10']?.expenses[0]?.tagIds).toHaveLength(2)
+    const files = await contentsOf(endpoint)
+    expect(files[monthFilePath('2026-10')]).not.toContain('tagNames')
+    expect(files[monthFilePath('2026-10')]).toContain('tagIds')
   })
 })

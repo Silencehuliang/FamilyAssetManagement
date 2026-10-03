@@ -134,6 +134,7 @@ describe('categoryShare', () => {
           amountCents: 900,
           date: '2026-10-01',
           categoryId: 'cat-gone',
+          tagIds: [],
           tagNames: [],
           memberId: XIAOHONG.id,
           recordedBy: XIAOHONG.id,
