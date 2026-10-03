@@ -27,7 +27,8 @@ export function springStep(
 /**
  * 手写 rAF 弹簧数字(不引入 motion 依赖):目标变化时从当前值弹向目标,
  * 收敛后停在目标整数上;首次挂载从 0 弹入。
- * prefers-reduced-motion: reduce 时不做弹簧,直接跳到目标值。
+ * prefers-reduced-motion: reduce 或文档处于隐藏状态(后台标签页 rAF 被节流)时
+ * 直接跳到目标值,避免数值长期停在起始值。
  */
 export function useSpringNumber(target: number): number {
   const [display, setDisplay] = useState(0)
@@ -38,7 +39,7 @@ export function useSpringNumber(target: number): number {
       typeof window !== 'undefined' &&
       typeof window.matchMedia === 'function' &&
       window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    if (prefersReducedMotion) {
+    if (prefersReducedMotion || (typeof document !== 'undefined' && document.hidden)) {
       springRef.current = { value: target, velocity: 0 }
       setDisplay(Math.round(target))
       return
